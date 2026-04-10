@@ -1,0 +1,9 @@
+# sparse_uniform_small
+# 8x8 grid, 4 items, 1 types, density 0.31
+# Food-only instance. Stresses grouping on an easy density.
+grid 8 8
+# w h type rotatable name
+2 2 7 0 Raw Meat
+2 2 7 0 Raw Meat
+3 2 7 0 Foodcube
+3 2 7 0 Riceweed

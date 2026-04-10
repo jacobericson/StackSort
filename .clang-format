@@ -1,0 +1,32 @@
+BasedOnStyle: Microsoft
+Standard: Cpp03
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+
+ColumnLimit: 120
+ReflowComments: false
+
+BreakBeforeBraces: Allman
+PointerAlignment: Left
+DerivePointerAlignment: false
+AlignAfterOpenBracket: Align
+
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+
+AlignConsecutiveDeclarations: None
+AlignConsecutiveAssignments: Consecutive
+AlignTrailingComments: Always
+
+SpaceBeforeParens: ControlStatements
+NamespaceIndentation: None
+
+SortIncludes: Never
+IncludeBlocks: Preserve
+
+CommentPragmas: '^ (pragma|NOLINT|clang-format|IWYU)'

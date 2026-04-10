@@ -1,0 +1,21 @@
+# uniform_small
+# 8x8 grid, 15 items, 3 types, density 0.62
+# Smallest items available. Kenshi has no 1x1; 2x1/1x2/3x1 are the floor.
+# Grouping + ordering dominate score here.
+grid 8 8
+# w h type rotatable name
+2 1 6 0 Basic First Aid Kit
+2 1 6 0 Basic First Aid Kit
+2 1 6 0 Basic First Aid Kit
+2 1 6 0 Basic First Aid Kit
+1 2 10 0 Lantern
+1 2 10 0 Lantern
+1 2 10 0 Lantern
+1 2 10 0 Lantern
+3 1 1 0 Bolts [Toothpicks]
+3 1 1 0 Bolts [Toothpicks]
+3 1 1 0 Bolts [Toothpicks]
+3 1 1 0 Bolts [Toothpicks]
+4 1 1 0 Bolts [Regulars]
+4 1 1 0 Bolts [Regulars]
+4 1 1 0 Bolts [Regulars]

@@ -1,0 +1,37 @@
+# VS 2010 user/IDE files
+*.suo
+*.sdf
+*.vcxproj.user
+.vs/
+
+# Build output
+build/
+x64/
+
+# Compiled DLL (build artifact, not source)
+*.dll
+
+# Root build script and mod descriptor (local/generated)
+/build.bat
+*.mod
+
+# Runtime logs
+*.log
+
+# Crash dumps and bug reports
+Bugs/
+
+# Tuning harness build + run artifacts
+tests/harness/bin/
+tests/harness/build.bat
+tests/harness/obj/
+tests/harness/obj_profile/
+tests/harness/obj_validate/
+tests/results/
+
+# Test configs (only baseline committed)
+tests/configs/*
+!tests/configs/baseline.ini
+
+# Python bytecode
+tests/__pycache__/
