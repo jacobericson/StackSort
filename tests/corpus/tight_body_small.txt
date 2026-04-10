@@ -1,0 +1,20 @@
+# tight_body_small
+# 8x10 grid, 15 items, 7 types, density 0.88
+# Barely fits. All-placed rate matters more than LER quality.
+grid 8 10
+# w h type rotatable name
+7 1 0 0 Guardless Katana
+7 1 0 0 Guardless Katana
+3 2 7 0 Foodcube
+3 2 7 0 Foodcube
+2 2 7 0 Raw Meat
+2 2 7 0 Raw Meat
+2 2 7 0 Raw Meat
+3 2 8 0 Tools
+1 2 10 0 Lantern
+1 2 10 0 Lantern
+3 1 1 0 Bolts [Toothpicks]
+3 1 1 0 Bolts [Toothpicks]
+2 1 6 0 Basic First Aid Kit
+5 1 1 0 Bolts [Longs]
+3 3 9 0 Straw Hat

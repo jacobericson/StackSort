@@ -1,0 +1,21 @@
+# one_big_rest_small
+# 10x14 grid, 16 items, 4 types, density 0.48
+# One 5x5 Water + many small fillers. Does 'big first' corner correctly?
+grid 10 14
+# w h type rotatable name
+5 5 7 0 Water
+3 1 1 0 Bolts [Toothpicks]
+3 1 1 0 Bolts [Toothpicks]
+3 1 1 0 Bolts [Toothpicks]
+3 1 1 0 Bolts [Toothpicks]
+1 2 10 0 Lantern
+1 2 10 0 Lantern
+1 2 10 0 Lantern
+1 2 10 0 Lantern
+2 1 6 0 Basic First Aid Kit
+2 1 6 0 Basic First Aid Kit
+2 1 6 0 Basic First Aid Kit
+4 1 1 0 Bolts [Regulars]
+4 1 1 0 Bolts [Regulars]
+2 2 7 0 Raw Meat
+2 2 7 0 Raw Meat

@@ -1,0 +1,17 @@
+# typical_body_survivor
+# 8x10 grid, 12 items, 5 types, density 0.56
+# High variety, small grid. Rotation makes real difference here.
+grid 8 10
+# w h type rotatable name
+2 1 6 0 Basic First Aid Kit
+2 1 6 0 Basic First Aid Kit
+2 2 7 0 Raw Meat
+2 2 7 0 Raw Meat
+3 2 7 0 Foodcube
+3 2 7 0 Foodcube
+3 1 1 0 Bolts [Toothpicks]
+1 2 10 0 Lantern
+1 2 10 0 Lantern
+2 2 8 0 Book
+3 2 7 0 Riceweed
+4 1 1 0 Bolts [Regulars]

@@ -1,0 +1,35 @@
+# typical_backpack_trader
+# 12x20 grid, 30 items, 4 types, density 0.63
+# Trader hauler: high count, low type variety, dense packing.
+grid 12 20
+# w h type rotatable name
+2 2 7 0 Raw Meat
+2 2 7 0 Raw Meat
+2 2 7 0 Raw Meat
+2 2 7 0 Raw Meat
+2 2 7 0 Raw Meat
+3 2 7 0 Foodcube
+3 2 7 0 Foodcube
+3 2 7 0 Foodcube
+3 2 7 0 Foodcube
+3 2 7 0 Riceweed
+3 2 7 0 Riceweed
+3 2 7 0 Riceweed
+3 2 7 0 Riceweed
+3 2 8 0 Tools
+3 2 8 0 Tools
+3 2 8 0 Crossbow Parts
+3 2 8 0 Crossbow Parts
+5 1 1 0 Bolts [Longs]
+5 1 1 0 Bolts [Longs]
+3 1 1 0 Bolts [Toothpicks]
+3 1 1 0 Bolts [Toothpicks]
+4 1 1 0 Bolts [Regulars]
+4 1 1 0 Bolts [Regulars]
+2 1 6 0 Basic First Aid Kit
+2 1 6 0 Basic First Aid Kit
+2 1 6 0 Basic First Aid Kit
+3 2 6 0 Skeleton Repair Kit
+3 2 6 0 Skeleton Repair Kit
+3 3 8 0 Fuel
+3 3 8 0 Fuel

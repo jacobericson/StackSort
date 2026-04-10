@@ -1,0 +1,14 @@
+# l_shape_forcing
+# 8x8 grid, 8 items, 6 types, density 0.77
+# Dense mix where the free space can only form an L-shape.
+# Tests ordering/rotation decisions on a fully-packed instance.
+grid 8 8
+# w h type rotatable name
+4 4 10 0 AI Core
+4 2 4 0 Leather Turtleneck
+3 3 9 0 Cap
+2 2 8 0 Book
+3 2 7 0 Foodcube
+2 1 6 0 Basic First Aid Kit
+2 1 6 0 Basic First Aid Kit
+1 2 10 0 Lantern

@@ -1,0 +1,44 @@
+# stranded_heavy
+# 20x20 grid, 38 items, 4 types, density 0.90
+# Dense blocky mix designed to force interior stranded cells.
+# Workload for exercising repair_move in the tuning harness.
+grid 20 20
+# w h type rotatable name
+4 6 3 0 Black Plate Jacket
+4 6 3 0 Black Plate Jacket
+4 6 3 0 Black Plate Jacket
+4 6 3 0 Black Plate Jacket
+4 5 3 0 Samurai Legplates
+4 5 3 0 Samurai Legplates
+4 5 3 0 Samurai Legplates
+2 7 8 0 Scout Leg (left)
+2 7 8 0 Scout Leg (left)
+3 3 8 0 Fuel
+3 3 8 0 Fuel
+3 3 8 0 Fuel
+3 3 8 0 Fuel
+3 3 8 0 Fuel
+3 3 8 0 Fuel
+3 3 8 0 Fuel
+3 3 8 0 Fuel
+3 3 8 0 Armour Plating
+3 3 8 0 Armour Plating
+3 3 8 0 Armour Plating
+3 3 8 0 Armour Plating
+3 3 8 0 Armour Plating
+3 2 7 0 Foodcube
+3 2 7 0 Foodcube
+3 2 7 0 Foodcube
+3 2 7 0 Foodcube
+2 2 7 0 Raw Meat
+2 2 7 0 Raw Meat
+2 2 7 0 Raw Meat
+2 2 7 0 Raw Meat
+2 2 7 0 Raw Meat
+2 2 7 0 Raw Meat
+2 1 6 0 Basic First Aid Kit
+2 1 6 0 Basic First Aid Kit
+2 1 6 0 Basic First Aid Kit
+2 1 6 0 Basic First Aid Kit
+2 1 6 0 Basic First Aid Kit
+2 1 6 0 Basic First Aid Kit

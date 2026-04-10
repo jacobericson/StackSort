@@ -1,0 +1,18 @@
+# diverse_large_grid
+# 12x20 grid, 13 items, 7 types, density 0.45
+# Varied sizes on a big grid. One 5x5, one 4x6, small items.
+grid 12 20
+# w h type rotatable name
+4 6 3 0 Black Plate Jacket
+4 4 10 0 AI Core
+5 5 7 0 Water
+2 2 7 0 Raw Meat
+2 2 7 0 Raw Meat
+3 2 7 0 Foodcube
+1 2 10 0 Lantern
+1 2 10 0 Lantern
+7 1 0 0 Guardless Katana
+3 3 9 0 Cap
+2 2 8 0 Book
+3 1 1 0 Bolts [Toothpicks]
+3 1 1 0 Bolts [Toothpicks]
