@@ -19,7 +19,7 @@ Replaces the vanilla sort button with a smarter packer. Click "Stacksort [N]" to
 - Multiple simultaneous inventories supported (up to 16)
 - Results cached across inventory close/reopen for the same character
 - Trader inventories excluded (vanilla sort preserved)
-- Full [KenshiRotate](https://github.com/jacobericson/KenshiRotate) integration: evaluates both orientations when KenshiRotate is installed
+- [KenshiRotate](https://github.com/jacobericson/KenshiRotate) integration available behind the `STACKSORT_ENABLE_ROTATION` compile flag (disabled in the initial release)
 
 ## Requirements
 
@@ -49,7 +49,7 @@ Target N=1 is the general-purpose sort — it packs items tightly and lets the l
 
 Right-click the Stacksort button at any time to revert items to their original positions.
 
-[FUTURE] If KenshiRotate is installed, items are automatically rotated to achieve better packing and rotated back when cycling. (Rotation is penalized due to visual clutter)
+KenshiRotate support is compiled out of the initial release to narrow confounding variables during troubleshooting. Rebuilding with `/DSTACKSORT_ENABLE_ROTATION` enables the full integration (both orientations evaluated per item, visuals refreshed after sort, rotation penalized to avoid visual clutter).
 
 ## Building from Source
 
@@ -72,14 +72,15 @@ The plugin hooks five game functions via KenshiLib:
 
 ### Packing Algorithm
 
-The packer uses a 5-layer approach:
+The packer runs a 5-layer pipeline, then a query-time selection over its cached results:
 
 1. **Greedy packer** (MAXRECTS or Skyline) places items in a single pass
 2. **LAHC search** (Late Acceptance Hill Climbing) explores item orderings to find better layouts
 3. **Diversified moves** (swap, insert, rotate-flip, repair) perturb the ordering
 4. **Multi-restart** (16 restarts first pass, 20 refinement) escapes local optima
 5. **Post-packing grouping swap** exchanges same-footprint items across types to improve clustering
-6. **Best-across-H** selects the best result at query time
+
+At click time, **best-across-target** selects the highest-scoring cached result whose LER side covers the requested target — so later clicks are served from a single lookup rather than rerunning the pipeline.
 
 For target>1, a pre-reservation scan carves out a strip at the grid edge (bottom in H-mode, right in W-mode) and packs items into the L-shaped complement. The empty strip is guaranteed by construction. Scoring uses a unified function with strict tier separation: items placed >> LER area >> target-met bonus >> fragmentation >> grouping.
 
@@ -134,7 +135,7 @@ The item-count gate was tuned at thresholds 20, 25, and 30. Threshold 20 matches
 
 ### Compatibility
 
-The plugin hooks game functions at runtime and doesn't modify any game data, save files, or item templates. Compatible with saves made before installation and with other mods. KenshiRotate is detected at startup and used opportunistically — StackSort works fine without it (the example gif is with rotation disabled).
+The plugin hooks game functions at runtime and doesn't modify any game data, save files, or item templates. Compatible with saves made before installation and with other mods. The initial release ships without KenshiRotate integration compiled in — builds with `/DSTACKSORT_ENABLE_ROTATION` detect KenshiRotate at startup and use it opportunistically. The example gif is with rotation disabled.
 
 ### Removing the mod
 

@@ -281,7 +281,7 @@ bool StackSortUI::ConsolidateStacks(InventorySection* section)
     {
         Item* target = snapshot[i];
 
-        // Check target still exists in section
+        // addQuantity only removes source, never target, so the pointer holds.
         Inventory* inv = section->parentInventory;
         if (!inv || !inv->hasItem(target)) continue;
 

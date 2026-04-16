@@ -31,12 +31,8 @@ static long long isqrt_ll(long long n)
     return x;
 }
 
-// Compute b^(quarters/4) via int-only ops. Fast paths for the common values
-// pin byte-match at the default (quarters=6 → b^1.5, the legacy formula).
-// General path uses (b^quarters)^(1/4) via two long-long isqrt passes,
-// which is much more accurate than nested int isqrt at small b.
-// Bounded by quarters <= 8 + realistic b <= ~80, so b^quarters <= 1.68e15,
-// well within long long range.
+// b^(quarters/4). Fast paths keep q=4/6/8 byte-match with the legacy
+// formula; general path nests two int isqrts so it always rounds down.
 static long long applyGroupingPower(int b, int quarters)
 {
     if (b <= 0 || quarters <= 0) return 0;

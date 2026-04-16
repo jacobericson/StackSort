@@ -1,10 +1,9 @@
 #pragma once
 
 class Item;
-
-// All return false / no-op when KenshiRotate absent. Main thread only.
-
 class InventoryGUI;
+
+#ifdef STACKSORT_ENABLE_ROTATION
 
 void StackSort_InitRotateAPI();
 bool StackSort_RotateAvailable();
@@ -13,7 +12,28 @@ bool StackSort_IsRotated(Item* item);
 bool StackSort_SetRotated(Item* item, bool rotated);
 void StackSort_RefreshVisuals(InventoryGUI* gui);
 
-// Calls AK::SoundEngine::PostEvent("General_Click", 0x6E, ...) directly.
-// Resolved at startup from kenshi_x64.exe. No-op if resolution failed.
+#else
 
+inline void StackSort_InitRotateAPI() {}
+inline bool StackSort_RotateAvailable()
+{
+    return false;
+}
+inline bool StackSort_CanRotate(Item*)
+{
+    return false;
+}
+inline bool StackSort_IsRotated(Item*)
+{
+    return false;
+}
+inline bool StackSort_SetRotated(Item*, bool)
+{
+    return false;
+}
+inline void StackSort_RefreshVisuals(InventoryGUI*) {}
+
+#endif
+
+// AK::SoundEngine::PostEvent direct call, resolved from kenshi_x64.exe.
 void StackSort_PlayClickSound();

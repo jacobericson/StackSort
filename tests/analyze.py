@@ -16,6 +16,7 @@ if _THIS_DIR not in sys.path:
     sys.path.insert(0, _THIS_DIR)
 
 from basins import stratified_bimodal_cells, basin_rates
+from loaders import load_csvs
 
 
 def fmt_int(v):
@@ -65,41 +66,7 @@ def fmt_pp_delta(v):
 
 
 def load_results(paths):
-    """Returns (DataFrame, schema_version).
-
-    Uses int() (truncation toward zero) for score_no_grouping to match
-    C++'s (long long) cast in ComputeScore — do NOT use round()."""
-    frames = []
-    max_schema = 1
-    for p in paths:
-        try:
-            df = pd.read_csv(p, skip_blank_lines=True)
-        except Exception as e:
-            print("WARN: failed to read {}: {}".format(p, e), file=sys.stderr)
-            continue
-        if "schema_version" in df.columns and len(df) > 0:
-            v = int(df["schema_version"].iloc[0])
-            if v > max_schema:
-                max_schema = v
-        frames.append(df)
-    if not frames:
-        return None, 1
-    df = pd.concat(frames, ignore_index=True)
-
-    if "scoring_grouping_weight" in df.columns and "grouping_bonus" in df.columns:
-        contribution = (df["grouping_bonus"] * df["concentration"]
-                        * df["scoring_grouping_weight"])
-        df["score_no_grouping"] = df["score"] - contribution.apply(
-            lambda x: int(x) if pd.notna(x) else 0)
-        if "first_pass_score" in df.columns and "first_pass_grouping_bonus" in df.columns:
-            fp_contribution = (df["first_pass_grouping_bonus"]
-                               * df["first_pass_concentration"]
-                               * df["scoring_grouping_weight"])
-            df["first_pass_score_no_grouping"] = (
-                df["first_pass_score"] - fp_contribution.apply(
-                    lambda x: int(x) if pd.notna(x) else 0))
-
-    return df, max_schema
+    return load_csvs(paths)
 
 
 def comparison_table(df, rotate_all, baseline_name, is_v2):
@@ -532,46 +499,59 @@ def scoring_weight_ablation(df, rotate_all, baseline_name):
 
 def repair_diagnostics_section(df, rotate_all, baseline_name):
     sub = df[df["rotate_all"] == rotate_all]
-    if sub.empty or "repair_attempts" not in sub.columns:
+    rolls_col = "repair_rolls" if "repair_rolls" in sub.columns else (
+                "repair_attempts" if "repair_attempts" in sub.columns else None)
+    if sub.empty or rolls_col is None:
         return None
+    has_scans = "repair_scans" in sub.columns
+    fp_rolls_col = "first_pass_repair_rolls" if "first_pass_repair_rolls" in sub.columns else (
+                   "first_pass_repair_attempts" if "first_pass_repair_attempts" in sub.columns else None)
+    fp_has_scans = "first_pass_repair_scans" in sub.columns
 
     lines = []
 
-    # Per-config summary
     configs = list(sub["config_name"].unique())
     if baseline_name in configs:
         configs.remove(baseline_name)
         configs.insert(0, baseline_name)
 
+    scans_hdr = " | scans/rolls" if has_scans else ""
     lines.append("**Per-config repair counters** (final diag means, first-pass in parens):")
     lines.append("")
-    lines.append("| Config | attempts/run | hits/attempts | accepts/hits |")
-    lines.append("|---|---:|---:|---:|")
+    lines.append("| Config | rolls/run{} | hits/scans | accepts/hits |".format(scans_hdr))
+    lines.append("|---|---:|{}---:|---:|".format("---:|" if has_scans else ""))
     for cfg in configs:
         c = sub[sub["config_name"] == cfg]
         if c.empty:
             continue
-        att = c["repair_attempts"].mean()
+        rolls = c[rolls_col].mean()
+        scans = c["repair_scans"].mean() if has_scans else rolls
         hits = c["repair_hits"].mean()
         acc = c["repair_accepts"].mean()
-        fp_att = c["first_pass_repair_attempts"].mean() if "first_pass_repair_attempts" in c.columns else None
+        fp_rolls = c[fp_rolls_col].mean() if fp_rolls_col else None
+        fp_scans = c["first_pass_repair_scans"].mean() if fp_has_scans else fp_rolls
         fp_hits = c["first_pass_repair_hits"].mean() if "first_pass_repair_hits" in c.columns else None
         fp_acc = c["first_pass_repair_accepts"].mean() if "first_pass_repair_accepts" in c.columns else None
-        hit_rate = (hits / att) if att else 0
+        hit_rate = (hits / scans) if scans else 0
         accept_rate = (acc / hits) if hits else 0
-        if fp_att is not None:
-            att_str = "{:.0f} ({:.0f})".format(att, fp_att)
-            hit_str = "{:.1%} ({:.1%})".format(
-                hit_rate,
-                (fp_hits / fp_att) if fp_att else 0)
+        scan_rate = (scans / rolls) if rolls else 0
+        if fp_rolls is not None:
+            rolls_str = "{:.0f} ({:.0f})".format(rolls, fp_rolls)
+            fp_hit_rate = (fp_hits / fp_scans) if fp_scans else 0
+            hit_str = "{:.1%} ({:.1%})".format(hit_rate, fp_hit_rate)
             acc_str = "{:.1%} ({:.1%})".format(
                 accept_rate,
                 (fp_acc / fp_hits) if fp_hits else 0)
         else:
-            att_str = "{:.0f}".format(att)
+            rolls_str = "{:.0f}".format(rolls)
             hit_str = "{:.1%}".format(hit_rate)
             acc_str = "{:.1%}".format(accept_rate)
-        lines.append("| {} | {} | {} | {} |".format(cfg, att_str, hit_str, acc_str))
+        if has_scans:
+            fp_scan_rate = (fp_scans / fp_rolls) if (fp_rolls and fp_has_scans) else 0
+            scan_str = " | {:.1%} ({:.1%})".format(scan_rate, fp_scan_rate) if fp_rolls else " | {:.1%}".format(scan_rate)
+            lines.append("| {} | {}{} | {} | {} |".format(cfg, rolls_str, scan_str, hit_str, acc_str))
+        else:
+            lines.append("| {} | {} | {} | {} |".format(cfg, rolls_str, hit_str, acc_str))
     lines.append("")
 
     # stranded_heavy outcome view
@@ -592,22 +572,25 @@ def repair_diagnostics_section(df, rotate_all, baseline_name):
                 cfg, med, mx, pct))
         lines.append("")
 
-    # Three-way diagnostic rollup for baseline
     base = sub[sub["config_name"] == baseline_name]
     if not base.empty:
-        att_sum = int(base["repair_attempts"].sum())
+        rolls_sum = int(base[rolls_col].sum())
+        scans_sum = int(base["repair_scans"].sum()) if has_scans else rolls_sum
         hit_sum = int(base["repair_hits"].sum())
         acc_sum = int(base["repair_accepts"].sum())
-        if att_sum == 0:
+        if rolls_sum == 0:
             verdict = "dead rolls (repair bucket never fires)"
+        elif scans_sum == 0:
+            verdict = "rolls never scan (bestStranded==0 on all iters)"
         elif hit_sum == 0:
-            verdict = "dead code on corpus (fires but never finds targets)"
+            verdict = "dead code on corpus (scans but never finds targets)"
         elif acc_sum == 0:
             verdict = "LAHC rejects (finds targets but candidate worse)"
         else:
-            verdict = ("live feature: {:,} attempts / {:,} hits / {:,} accepts "
-                       "on baseline".format(att_sum, hit_sum, acc_sum))
-        lines.append("**Baseline three-way rollup:** {}".format(verdict))
+            verdict = ("live feature: {:,} rolls / {:,} scans / {:,} hits / "
+                       "{:,} accepts on baseline".format(
+                           rolls_sum, scans_sum, hit_sum, acc_sum))
+        lines.append("**Baseline rollup:** {}".format(verdict))
         lines.append("")
 
     return "\n".join(lines) if lines else None

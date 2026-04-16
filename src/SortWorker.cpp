@@ -9,12 +9,10 @@
 #include "SortWorker.h"
 #include "ResultCache.h"
 #include "StackSort.h"
+#include "StackSortConfig.h"
 #include "Log.h"
 
 static const DWORD MUTATION_DEBOUNCE_MS = 150;
-static const int MAX_SECTIONS           = 4;
-static const int MAX_GUIS               = 16;
-static const int MAX_CACHED_SECTIONS    = 64;
 
 // Active target dim (H or W). Runtime-toggleable via ToggleDim().
 // Written only under s_queueLock to serialize with EnqueueJob.
@@ -46,6 +44,7 @@ static HANDLE s_threads[NUM_WORKERS];
 static HANDLE s_workSemaphore   = NULL;
 static volatile LONG s_shutdown = 0;
 static volatile Job* s_activeJobs[NUM_WORKERS];
+// Main-thread only: ApplyGuard writes, inventory mutation hooks read.
 static bool s_applying = false;
 
 int SortWorker::FindTracking(InventoryGUI* gui)
@@ -302,12 +301,15 @@ DWORD WINAPI SortWorker::WorkerProc(LPVOID param)
                 }
                 job = s_jobQueue[bestIdx];
                 s_jobQueue.erase(s_jobQueue.begin() + bestIdx);
+                // Publish to s_activeJobs under the same lock so eviction's
+                // IsSectionActive check always sees either the queue or the
+                // active slot — never a window where the job is untracked.
+                s_activeJobs[workerIdx] = job;
             }
         }
 
         if (!job) continue;
 
-        s_activeJobs[workerIdx] = job;
         ExecuteJob(job, workerIdx);
         // Null the pointer under s_queueLock so AbortJobsForGUI can't
         // dereference a freed job between our NULL and delete.

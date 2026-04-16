@@ -22,7 +22,12 @@
 #include "Config.h"
 #include "Csv.h"
 
-static const int CSV_SCHEMA_VERSION = 1;
+// build.bat passes /DSTACKSORT_GIT_SHA="<short sha>". Ad-hoc builds fall through.
+#ifndef STACKSORT_GIT_SHA
+#define STACKSORT_GIT_SHA "unknown"
+#endif
+
+static const int CSV_SCHEMA_VERSION = 2;
 
 struct Args
 {
@@ -198,10 +203,12 @@ static std::vector<std::string> BuildHeader()
     h.push_back("refine_wall_ms");
     h.push_back("scoring_grouping_weight");
     h.push_back("scoring_frag_weight");
-    h.push_back("repair_attempts");
+    h.push_back("repair_rolls");
+    h.push_back("repair_scans");
     h.push_back("repair_hits");
     h.push_back("repair_accepts");
-    h.push_back("first_pass_repair_attempts");
+    h.push_back("first_pass_repair_rolls");
+    h.push_back("first_pass_repair_scans");
     h.push_back("first_pass_repair_hits");
     h.push_back("first_pass_repair_accepts");
     h.push_back("scoring_grouping_power_quarters");
@@ -398,7 +405,7 @@ int main(int argc, char** argv)
                 std::vector<std::string> row;
                 row.push_back(IntToStr(CSV_SCHEMA_VERSION));
                 row.push_back(tsStr);
-                row.push_back("unknown");
+                row.push_back(STACKSORT_GIT_SHA);
                 row.push_back(targetCfg.name);
                 row.push_back(inst.name);
                 row.push_back(IntToStr((long long)args.baseSeed + (long long)seedIdx));
@@ -466,10 +473,12 @@ int main(int argc, char** argv)
                     (runParams.scoringFragWeight > 0) ? runParams.scoringFragWeight : Packer::DEFAULT_FRAG_WEIGHT;
                 row.push_back(IntToStr(resolvedGW));
                 row.push_back(IntToStr(resolvedFW));
-                row.push_back(IntToStr(finalDiag.repairMoveAttempts));
+                row.push_back(IntToStr(finalDiag.repairMoveRolls));
+                row.push_back(IntToStr(finalDiag.repairMoveScans));
                 row.push_back(IntToStr(finalDiag.repairMoveHits));
                 row.push_back(IntToStr(finalDiag.repairMoveAccepts));
-                row.push_back(IntToStr(firstDiag.repairMoveAttempts));
+                row.push_back(IntToStr(firstDiag.repairMoveRolls));
+                row.push_back(IntToStr(firstDiag.repairMoveScans));
                 row.push_back(IntToStr(firstDiag.repairMoveHits));
                 row.push_back(IntToStr(firstDiag.repairMoveAccepts));
                 int resolvedGPQ = (runParams.groupingPowerQuarters >= 1 && runParams.groupingPowerQuarters <= 8)

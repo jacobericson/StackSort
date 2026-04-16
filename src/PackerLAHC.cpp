@@ -246,7 +246,8 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     bool diagUnconstrainedFallbackWon = false;
     long long diagGreedySeedScore     = 0;
     int diagGreedySeedLerArea         = 0;
-    int diagRepairMoveAttempts        = 0;
+    int diagRepairMoveRolls           = 0;
+    int diagRepairMoveScans           = 0;
     int diagRepairMoveHits            = 0;
     int diagRepairMoveAccepts         = 0;
 
@@ -425,6 +426,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     int totalCellsRepair = gridW * gridH;
     std::vector<unsigned char> repairGrid(totalCellsRepair);
     std::vector<unsigned char> repairReachable(totalCellsRepair);
+    std::vector<int> repairStrandedList; // interior cells not reachable from LER
     bool repairGridDirty = true;
 
     for (int restart = 0; restart < effectiveRestarts; ++restart)
@@ -549,12 +551,13 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                 // packing, find an item whose dims could fill it, move that
                 // item to position 0 in the ordering (highest packing priority).
                 // Falls back to random swap if no repair target found.
-                ++diagRepairMoveAttempts;
+                ++diagRepairMoveRolls;
                 move.type        = MOVE_REPAIR;
                 bool repairFound = false;
 
                 if (bestStranded > 0 && !bestPl.empty())
                 {
+                    ++diagRepairMoveScans;
                     // Rebuild bestPl occupancy + LER reachability only when
                     // bestPl changed. Cache hit: memcpy 800 bytes vs full
                     // rebuild + flood fill (~2-4us).
@@ -570,6 +573,18 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                         FloodFillFromLer(ctx, gridW, gridH, bestLerX, bestLerY, bestLerW, bestLerH);
                         memcpy(&repairGrid[0], &ctx.grid[0], totalCellsRepair);
                         memcpy(&repairReachable[0], &ctx.visited[0], totalCellsRepair);
+                        // Build stranded-cell list in the same scan order the
+                        // reservoir loop used to walk, so the RNG stream below
+                        // is byte-identical to the pre-cache implementation.
+                        repairStrandedList.clear();
+                        for (int sy = 1; sy < gridH - 1; ++sy)
+                        {
+                            for (int sx = 1; sx < gridW - 1; ++sx)
+                            {
+                                int si = sy * gridW + sx;
+                                if (ctx.grid[si] == 0 && !ctx.visited[si]) repairStrandedList.push_back(si);
+                            }
+                        }
                         repairGridDirty = false;
                     }
                     else
@@ -578,23 +593,16 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                         memcpy(&ctx.visited[0], &repairReachable[0], totalCellsRepair);
                     }
 
-                    // Find a random truly stranded cell (interior, empty, NOT reachable)
                     int strandedX = -1, strandedY = -1;
                     int candidates = 0;
-                    for (int sy = 1; sy < gridH - 1; ++sy)
+                    for (size_t li = 0; li < repairStrandedList.size(); ++li)
                     {
-                        for (int sx = 1; sx < gridW - 1; ++sx)
+                        int si = repairStrandedList[li];
+                        ++candidates;
+                        if (rng.nextInt(candidates) == 0)
                         {
-                            int si = sy * gridW + sx;
-                            if (ctx.grid[si] != 0) continue;
-                            if (ctx.visited[si]) continue; // reachable from LER
-                            ++candidates;
-                            // Reservoir sampling: pick one uniformly at random
-                            if (rng.nextInt(candidates) == 0)
-                            {
-                                strandedX = sx;
-                                strandedY = sy;
-                            }
+                            strandedX = si % gridW;
+                            strandedY = si / gridW;
                         }
                     }
 
@@ -646,36 +654,29 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                         int gapW = maxGX - minGX + 1;
                         int gapH = maxGY - minGY + 1;
 
-                        // Find an item in curOrder whose dims fit the gap bbox
+                        // One pass to find each type's first index + count.
+                        // n <= 256 (AdjGraph cap), and typeId <= n-1 by construction.
+                        int firstIdx[256];
+                        int groupCount[256];
+                        for (int i = 0; i < n; ++i)
+                        {
+                            firstIdx[i]   = -1;
+                            groupCount[i] = 0;
+                        }
+                        for (int ki = 0; ki < n; ++ki)
+                        {
+                            int typeId = curOrder[ki].itemTypeId;
+                            if (typeId < 0 || typeId >= n) continue;
+                            if (firstIdx[typeId] < 0) firstIdx[typeId] = ki;
+                            ++groupCount[typeId];
+                        }
+
                         for (int ki = 0; ki < n; ++ki)
                         {
                             // Skip first item of a multi-item type group —
                             // it anchors contact-point clustering for its type.
-                            {
-                                int typeId      = curOrder[ki].itemTypeId;
-                                bool seenBefore = false;
-                                for (int ci = 0; ci < ki; ++ci)
-                                {
-                                    if (curOrder[ci].itemTypeId == typeId)
-                                    {
-                                        seenBefore = true;
-                                        break;
-                                    }
-                                }
-                                if (!seenBefore)
-                                {
-                                    bool hasMore = false;
-                                    for (int ci = ki + 1; ci < n; ++ci)
-                                    {
-                                        if (curOrder[ci].itemTypeId == typeId)
-                                        {
-                                            hasMore = true;
-                                            break;
-                                        }
-                                    }
-                                    if (hasMore) continue;
-                                }
-                            }
+                            int typeId = curOrder[ki].itemTypeId;
+                            if (typeId >= 0 && typeId < n && ki == firstIdx[typeId] && groupCount[typeId] > 1) continue;
 
                             bool fitsNormal = (curOrder[ki].w <= gapW && curOrder[ki].h <= gapH);
                             bool fitsRotated =
@@ -809,6 +810,17 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     {
         Result unconResult = PackH(gridW, gridH, items, target, abortFlag);
         diagPackCalls += 2; // PackH = BSSF + BAF internally
+
+        // Rescore under effective weights: PackH hardcodes defaults, bestScore doesn't.
+        if (unconResult.allPlaced)
+        {
+            long long unGrouping      = ComputeGroupingBonus(unconResult.placements, items, effGroupingPower);
+            unconResult.groupingBonus = unGrouping;
+            unconResult.score = ComputeScore(unconResult.placements.size(), unconResult.lerArea, unconResult.lerHeight,
+                                             unconResult.concentration, target, CountRotated(unconResult.placements),
+                                             unGrouping, unconResult.strandedCells, effGroupingWeight, effFragWeight);
+        }
+
         if (unconResult.allPlaced && unconResult.score > bestScore)
         {
             bestPl                       = unconResult.placements;
@@ -857,7 +869,8 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         outDiag->unconstrainedFallbackWon = diagUnconstrainedFallbackWon;
         outDiag->greedySeedScore          = diagGreedySeedScore;
         outDiag->greedySeedLerArea        = diagGreedySeedLerArea;
-        outDiag->repairMoveAttempts       = diagRepairMoveAttempts;
+        outDiag->repairMoveRolls          = diagRepairMoveRolls;
+        outDiag->repairMoveScans          = diagRepairMoveScans;
         outDiag->repairMoveHits           = diagRepairMoveHits;
         outDiag->repairMoveAccepts        = diagRepairMoveAccepts;
         // Power-independent clustering metric for cross-power CSV/analysis.

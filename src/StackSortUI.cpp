@@ -15,6 +15,7 @@
 #include "ResultCache.h"
 #include "SortWorker.h"
 #include "StackSort.h"
+#include "StackSortConfig.h"
 #include "Log.h"
 
 class InventoryGUIAccess : public InventoryGUI
@@ -30,8 +31,6 @@ static std::string MakeCaption(int target)
     ss << "Stacksort [" << target << "]";
     return ss.str();
 }
-
-static const int MAX_GUIS = 16;
 
 struct UIState
 {

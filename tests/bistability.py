@@ -15,26 +15,11 @@ if _THIS_DIR not in sys.path:
     sys.path.insert(0, _THIS_DIR)
 
 from basins import stratified_bimodal_cells, basin_rates, detect_bimodal
+from loaders import load_csvs as _load_csvs
 
 
 def load_csvs(paths):
-    frames = []
-    for p in paths:
-        try:
-            df = pd.read_csv(p)
-        except Exception as e:
-            print("WARN: {}: {}".format(p, e), file=sys.stderr)
-            continue
-        frames.append(df)
-    if not frames:
-        return None
-    df = pd.concat(frames, ignore_index=True)
-    # v3: derive score_no_grouping for cross-weight drilldowns.
-    if "scoring_grouping_weight" in df.columns and "grouping_bonus" in df.columns:
-        contrib = (df["grouping_bonus"] * df["concentration"]
-                   * df["scoring_grouping_weight"])
-        df["score_no_grouping"] = df["score"] - contrib.apply(
-            lambda x: int(x) if pd.notna(x) else 0)
+    df, _ = _load_csvs(paths)
     return df
 
 

@@ -146,11 +146,12 @@ class Packer
         long long greedySeedScore;
         int greedySeedLerArea;
 
-        // Repair move counters. attempts = repair bucket rolled (whether
-        // target was found or swap fallback fired). hits = stranded target
-        // located and item moved to position 0. accepts = LAHC accepted the
-        // repair-move candidate.
-        int repairMoveAttempts;
+        // rolls = repair bucket selected on the iter dispatch roll.
+        // scans = stranded-cell scan actually ran (gated on bestStranded>0).
+        // hits = scan found a fitting item and moved it to position 0.
+        // accepts = LAHC accepted the repair candidate.
+        int repairMoveRolls;
+        int repairMoveScans;
         int repairMoveHits;
         int repairMoveAccepts;
 
@@ -176,8 +177,8 @@ class Packer
 
         PackDiagnostics()
             : bestFoundIter(0), bestFoundRestart(0), plateauBreaks(0), lahcItersExecuted(0), packCalls(0),
-              unconstrainedFallbackWon(false), greedySeedScore(0), greedySeedLerArea(0), repairMoveAttempts(0),
-              repairMoveHits(0), repairMoveAccepts(0), groupingBordersRaw(0)
+              unconstrainedFallbackWon(false), greedySeedScore(0), greedySeedLerArea(0), repairMoveRolls(0),
+              repairMoveScans(0), repairMoveHits(0), repairMoveAccepts(0), groupingBordersRaw(0)
 #ifdef STACKSORT_PROFILE
               ,
               profCyclesMoveGen(0), profCyclesSkylinePack(0), profCyclesLer(0), profCyclesConcentration(0),

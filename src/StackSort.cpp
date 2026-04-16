@@ -25,6 +25,7 @@
 #include "CatalogDump.h"
 #endif
 
+#ifdef STACKSORT_ENABLE_ROTATION
 typedef int (*KR_ApiVersionFn)();
 typedef int (*KR_IsRotatedFn)(void*);
 typedef int (*KR_CanRotateFn)(void*);
@@ -37,6 +38,7 @@ static KR_CanRotateFn s_krCanRotate           = NULL;
 static KR_SetRotatedFn s_krSetRotated         = NULL;
 static KR_RefreshVisualsFn s_krRefreshVisuals = NULL;
 static bool s_krAvailable                     = false;
+#endif
 
 // Resolved from kenshi_x64.exe at startup.
 
@@ -65,6 +67,7 @@ static bool isTraderGUI(InventoryGUI* gui)
     return *(void***)gui != s_baseVtable;
 }
 
+#ifdef STACKSORT_ENABLE_ROTATION
 void StackSort_InitRotateAPI()
 {
     HMODULE hMod = GetModuleHandleA("KenshiRotate.dll");
@@ -121,6 +124,7 @@ void StackSort_RefreshVisuals(InventoryGUI* gui)
 {
     if (s_krAvailable && s_krRefreshVisuals) s_krRefreshVisuals((void*)gui);
 }
+#endif
 
 void StackSort_PlayClickSound()
 {
@@ -322,7 +326,8 @@ __declspec(dllexport) void startPlugin()
 #ifdef STACKSORT_VERBOSE
     CatalogDump::Init();
 #endif
-    // StackSort_InitRotateAPI();
+    // No-op unless STACKSORT_ENABLE_ROTATION is defined at compile time.
+    StackSort_InitRotateAPI();
 
     // Resolve AK::SoundEngine::PostEvent from kenshi_x64.exe
     {
