@@ -2,7 +2,7 @@
 
 Inventory auto-sort mod for Kenshi that optimizes for maximum contiguous free space.
 
-Replaces the vanilla sort button with a smarter packer. Click "Stacksort [N]" to cycle through target sizes — the mod pre-reserves an N-cell-tall (or N-cell-wide) empty strip so incoming items of a known size always have room. Switch between **H**eight-mode and **W**idth-mode with the H/W toggle button to reserve space for whichever orientation fits your use case. Results are precomputed on a background thread for instant response.
+Replaces the vanilla sort button with a smarter packer. Click "Stacksort [N]" to cycle through the top results — the mod pre-reserves an N-cell-tall (or N-cell-wide) empty strip so incoming items of a known size always have room. Switch between **H**eight-mode and **W**idth-mode with the H/W toggle button to reserve space for whichever orientation fits your use case. Results are precomputed on a background thread for instant response.
 
 ![StackSort demo](stacksort.gif)
 
@@ -49,7 +49,7 @@ Target N=1 is the general-purpose sort — it packs items tightly and lets the l
 
 Right-click the Stacksort button at any time to revert items to their original positions.
 
-If KenshiRotate is installed, items are automatically rotated to achieve better packing and rotated back when cycling. (Rotation is penalized due to visual clutter)
+[FUTURE] If KenshiRotate is installed, items are automatically rotated to achieve better packing and rotated back when cycling. (Rotation is penalized due to visual clutter)
 
 ## Building from Source
 
@@ -120,7 +120,7 @@ Refinement runs a second LAHC pass warm-started from the first-pass best orderin
 
 #### Refinement trigger heuristic
 
-Correlation analysis on `refine_always` data (every target refined regardless of quality) identified `num_items` as the strongest predictor of refinement value (r=0.67), far above density (r=0.17) or concentration (r=-0.03).
+Correlation analysis on `refine_always` data (every target refined regardless of quality) identified `num_items` as the strongest predictor of refinement value (r=0.67).
 
 | Trigger condition | Purpose |
 |---|---|
@@ -134,7 +134,7 @@ The item-count gate was tuned at thresholds 20, 25, and 30. Threshold 20 matches
 
 ### Compatibility
 
-The plugin hooks game functions at runtime and doesn't modify any game data, save files, or item templates. Compatible with saves made before installation and with other mods. KenshiRotate is detected at startup and used opportunistically — StackSort works fine without it.
+The plugin hooks game functions at runtime and doesn't modify any game data, save files, or item templates. Compatible with saves made before installation and with other mods. KenshiRotate is detected at startup and used opportunistically — StackSort works fine without it (the example gif is with rotation disabled).
 
 ### Removing the mod
 
