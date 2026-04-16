@@ -14,12 +14,6 @@
 #include "StackSort.h"
 #include "Log.h"
 
-class InventoryGUIAccess : public InventoryGUI
-{
-  public:
-    using InventoryGUI::refreshAllSections;
-};
-
 struct CallbackGuard
 {
     InventorySection* section;
@@ -98,7 +92,7 @@ static void applyLayout(InventorySection* section, const Packer::Result& result,
             bool currentlyRotated = StackSort_IsRotated(item);
             if (!StackSort_SetRotated(item, !currentlyRotated))
             {
-                InfoLog("[StackSort] SetRotated failed for item " + IntToStr(p.id) + ", will auto-place");
+                LogInfo("[StackSort] SetRotated failed for item " + IntToStr(p.id) + ", will auto-place");
                 rotationFailed[i] = true;
             }
         }
@@ -170,7 +164,7 @@ void StackSortUI::ApplySort(InventoryGUI* gui, int target, int& outAppliedLerSid
                 std::string tStr = std::string("[") + dimTag + "] target=" + IntToStr(clamped);
                 if (sourceTarget != clamped) tStr += " (via target=" + IntToStr(sourceTarget) + ")";
 
-                InfoLog("[StackSort] Applying " + tStr + " for '" + section->name + "'" + " (" +
+                LogInfo("[StackSort] Applying " + tStr + " for '" + section->name + "'" + " (" +
                         IntToStr((int)ptrs.size()) + " items)" + ", LER " + IntToStr(precomputed.lerWidth) + "x" +
                         IntToStr(precomputed.lerHeight) + "=" + IntToStr(precomputed.lerArea) + " at (" +
                         IntToStr(precomputed.lerX) + "," + IntToStr(precomputed.lerY) + ")" + " (was " +
@@ -206,19 +200,26 @@ void StackSortUI::ApplySort(InventoryGUI* gui, int target, int& outAppliedLerSid
 
         if (packItems.empty()) continue;
 
-        InfoLog(std::string("[StackSort] Sync fallback [") + dimTag + "] target=" + IntToStr(clamped) + " for '" +
+        LogInfo(std::string("[StackSort] Sync fallback [") + dimTag + "] target=" + IntToStr(clamped) + " for '" +
                 section->name + "'" + " (" + IntToStr(gridW) + "x" + IntToStr(gridH) + ", " +
                 IntToStr((int)packItems.size()) + " items)");
 
+        // Tight-budget PackAnnealed so the sync path honors pre-reservation
+        // for target>1. Main-thread cost: ~tens of ms on typical inventories.
+        Packer::SearchParams syncParams = Packer::SearchParams::defaults();
+        syncParams.numRestarts          = 4;
+        syncParams.itersPerRestart      = 1000;
+
         QueryPerformanceCounter(&t0);
-        Packer::Result result = Packer::Pack(gridW, gridH, packItems, dim, clamped);
+        Packer::Result result =
+            Packer::PackAnnealed(gridW, gridH, packItems, dim, clamped, NULL, NULL, NULL, 0, &syncParams);
         QueryPerformanceCounter(&t1);
 
         double ms = (double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart * 1000.0;
 
         if (!result.allPlaced)
         {
-            InfoLog("[StackSort] Not all items placed (" + IntToStr((int)result.placements.size()) + "/" +
+            LogInfo("[StackSort] Not all items placed (" + IntToStr((int)result.placements.size()) + "/" +
                     IntToStr((int)packItems.size()) + "), falling back to vanilla");
             section->_NV_autoArrange();
             continue;
@@ -226,7 +227,7 @@ void StackSortUI::ApplySort(InventoryGUI* gui, int target, int& outAppliedLerSid
 
         if (!Packer::ValidatePlacements(gridW, gridH, result.placements))
         {
-            ErrorLog("[StackSort] Placement validation failed, vanilla fallback");
+            LogError("[StackSort] Placement validation failed, vanilla fallback");
             section->_NV_autoArrange();
             continue;
         }
@@ -238,7 +239,7 @@ void StackSortUI::ApplySort(InventoryGUI* gui, int target, int& outAppliedLerSid
                << ", LER " << result.lerWidth << "x" << result.lerHeight << "=" << result.lerArea << " (was "
                << beforeLerW << "x" << beforeLerH << "=" << beforeLerArea << ")"
                << ", score " << result.score;
-        DebugLog(logMsg.str());
+        LogDebug(logMsg.str());
 
         applyLayout(section, result, itemPtrs);
         int lerSide = (dim == Packer::TARGET_H) ? result.lerHeight : result.lerWidth;
@@ -251,7 +252,7 @@ void StackSortUI::ApplySort(InventoryGUI* gui, int target, int& outAppliedLerSid
 
     if (anySorted)
     {
-        ((InventoryGUIAccess*)gui)->refreshAllSections();
+        StackSortUI::ForceRefreshAllSections(gui);
         StackSort_RefreshVisuals(gui);
     }
 
@@ -443,7 +444,7 @@ bool StackSortUI::RevertInventory(InventoryGUI* gui)
 
     if (anySorted)
     {
-        ((InventoryGUIAccess*)gui)->refreshAllSections();
+        StackSortUI::ForceRefreshAllSections(gui);
         StackSort_RefreshVisuals(gui);
     }
 

@@ -1,20 +1,9 @@
 #pragma once
 
-#include <Debug.h>
+#include <Debug.h> // KenshiLib: DebugLog, ErrorLog
 
 #include <string>
 #include <sstream>
-
-// InfoLog: always active, for lifecycle and user-visible events.
-// Uses the same output channel as DebugLog (RE_Kenshi log).
-inline void InfoLog(const std::string& message)
-{
-    DebugLog(message);
-}
-inline void InfoLog(const char* message)
-{
-    DebugLog(message);
-}
 
 inline std::string IntToStr(int v)
 {
@@ -23,13 +12,28 @@ inline std::string IntToStr(int v)
     return ss.str();
 }
 
-// In prod builds, DebugLog compiles out entirely (including string
-// construction at the call site). InfoLog and ErrorLog remain active.
-//
-// INCLUDE ORDER: Log.h must be the final Debug.h consumer in any TU.
-// A later `#include <Debug.h>` rebinds its macro and silently undoes
-// the prod-build compile-out below.
-#ifndef STACKSORT_VERBOSE
-#undef DebugLog
-#define DebugLog(...) ((void)0)
+// Info/Error: always active. Route through KenshiLib's loggers.
+inline void LogInfo(const std::string& m)
+{
+    DebugLog(m);
+}
+inline void LogInfo(const char* m)
+{
+    DebugLog(m);
+}
+inline void LogError(const std::string& m)
+{
+    ErrorLog(m);
+}
+inline void LogError(const char* m)
+{
+    ErrorLog(m);
+}
+
+// Debug: compiled out in prod. Macro so call-site string construction
+// (e.g. "foo" + IntToStr(bar)) is elided entirely.
+#ifdef STACKSORT_VERBOSE
+#define LogDebug(msg) DebugLog(msg)
+#else
+#define LogDebug(msg) ((void)0)
 #endif

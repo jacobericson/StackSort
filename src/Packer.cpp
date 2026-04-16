@@ -23,7 +23,7 @@ struct ItemSortCompare
 
 void Packer::SortItems(std::vector<Item>& items)
 {
-    std::sort(items.begin(), items.end(), ItemSortCompare());
+    std::stable_sort(items.begin(), items.end(), ItemSortCompare());
 }
 
 void Packer::InitPackContext(PackContext& ctx, int gridW, int gridH, int numItems)

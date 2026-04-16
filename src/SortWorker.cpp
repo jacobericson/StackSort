@@ -71,7 +71,7 @@ int SortWorker::AllocTracking(InventoryGUI* gui)
             return i;
         }
     }
-    ErrorLog("[StackSort] All GUI tracking slots full (max " + IntToStr(MAX_GUIS) + ")");
+    LogError("[StackSort] All GUI tracking slots full (max " + IntToStr(MAX_GUIS) + ")");
     return -1;
 }
 
@@ -112,7 +112,7 @@ void SortWorker::ScanInventory(int trackIdx, Inventory* inv, bool* outNeedsCompu
         // Check if cached results are still valid for this section and dim
         if (ResultCache::IsReusable(section, itemCount, gridW, gridH, dim))
         {
-            DebugLog("[StackSort] Cache hit: section=" + IntToStr((int)(intptr_t)section) + " '" + section->name + "'" +
+            LogDebug("[StackSort] Cache hit: section=" + IntToStr((int)(intptr_t)section) + " '" + section->name + "'" +
                      " (" + IntToStr(itemCount) + " items)");
             t.sectionKeys[t.numSections] = section;
             ++t.numSections;
@@ -157,7 +157,7 @@ void SortWorker::ScanInventory(int trackIdx, Inventory* inv, bool* outNeedsCompu
 
         ResultCache::Insert(section, gridW, gridH, dim, packItems, itemPtrs);
 
-        DebugLog("[StackSort] Cache miss: section=" + IntToStr((int)(intptr_t)section) + " '" + section->name + "'" +
+        LogDebug("[StackSort] Cache miss: section=" + IntToStr((int)(intptr_t)section) + " '" + section->name + "'" +
                  " " + IntToStr(gridW) + "x" + IntToStr(gridH) + " " + IntToStr((int)packItems.size()) + " items");
 
         t.sectionKeys[t.numSections] = section;
@@ -252,7 +252,7 @@ void SortWorker::EnqueueJob(int trackIdx)
         if (i < t.numSections - 1) msg += ", ";
     }
     msg += ")";
-    InfoLog(msg);
+    LogInfo(msg);
 }
 
 void SortWorker::AbortJobsForGUI(InventoryGUI* gui)
@@ -344,9 +344,9 @@ void SortWorker::Init()
     {
         s_activeJobs[i] = NULL;
         s_threads[i]    = CreateThread(NULL, 0, WorkerProc, (LPVOID)(intptr_t)i, 0, NULL);
-        if (!s_threads[i]) ErrorLog("[StackSort] Failed to create worker thread " + IntToStr(i));
+        if (!s_threads[i]) LogError("[StackSort] Failed to create worker thread " + IntToStr(i));
     }
-    InfoLog("[StackSort] " + IntToStr(NUM_WORKERS) + " worker threads started");
+    LogInfo("[StackSort] " + IntToStr(NUM_WORKERS) + " worker threads started");
 }
 
 void SortWorker::Shutdown()
@@ -393,7 +393,7 @@ void SortWorker::OnInventoryOpened(InventoryGUI* gui)
 
     if (s_guiTracking[idx].numSections == 0) return; // no eligible sections (keep tracking to prevent per-frame retry)
 
-    InfoLog("[StackSort] Inventory opened (cache: " + IntToStr(ResultCache::Size()) + " entries)");
+    LogInfo("[StackSort] Inventory opened (cache: " + IntToStr(ResultCache::Size()) + " entries)");
 
     // Evict old unreferenced cache entries if needed
     // Gather all referenced section keys across all open GUIs
@@ -422,7 +422,7 @@ void SortWorker::OnInventoryClosed(InventoryGUI* gui)
     s_guiTracking[idx].mutationPending = false;
     FreeTracking(idx);
 
-    InfoLog("[StackSort] Inventory closed (cache: " + IntToStr(ResultCache::Size()) + " entries)");
+    LogInfo("[StackSort] Inventory closed (cache: " + IntToStr(ResultCache::Size()) + " entries)");
 }
 
 void SortWorker::OnMutation(InventoryGUI* gui)
@@ -446,6 +446,11 @@ void SortWorker::OnMutation(InventoryGUI* gui)
 
 void SortWorker::PollWorkerStart()
 {
+    // Cap re-snapshot+enqueue work per frame. ScanInventory walks every item
+    // and EnqueueJob takes s_queueLock, so a burst of 16 concurrent mutations
+    // shouldn't all land on a single frame. Cap=3 bounds worst-case latency
+    // at ceil(16/3) = 6 frames (~100ms at 60fps).
+    int processed = 0;
     for (int i = 0; i < MAX_GUIS; ++i)
     {
         GUITracking& t = s_guiTracking[i];
@@ -467,7 +472,7 @@ void SortWorker::PollWorkerStart()
         if (needsCompute) EnqueueJob(i);
 
         t.mutationPending = false;
-        break; // one per frame
+        if (++processed >= 3) break;
     }
 }
 
@@ -662,7 +667,7 @@ void SortWorker::ToggleDim()
         if (needsCompute) EnqueueJob(i);
     }
 
-    InfoLog(std::string("[StackSort] Target dim toggled to ") + (newDim == Packer::TARGET_H ? "H" : "W"));
+    LogInfo(std::string("[StackSort] Target dim toggled to ") + (newDim == Packer::TARGET_H ? "H" : "W"));
 }
 
 int SortWorker::GetMaxTarget(InventorySection* section)

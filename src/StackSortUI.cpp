@@ -24,6 +24,11 @@ class InventoryGUIAccess : public InventoryGUI
     using InventoryGUI::refreshAllSections;
 };
 
+void StackSortUI::ForceRefreshAllSections(InventoryGUI* gui)
+{
+    ((InventoryGUIAccess*)gui)->refreshAllSections();
+}
+
 static std::string MakeCaption(int target)
 {
     // Caption is dim-agnostic in the number; the dim toggle button shows H/W.
@@ -204,7 +209,7 @@ void StackSortUI::InitializeUI(InventoryGUI* gui, MyGUI::Widget* arrangeBtn, Inv
     bool isBodyGUI          = (gui == ownerGUI && gui->childInventory != NULL);
     const int BODY_X_OFFSET = -40;
 
-    DebugLog(std::string("[StackSort] Layout anchor: arrangeBtn (") + IntToStr(ac.left) + "," + IntToStr(ac.top) + " " +
+    LogDebug(std::string("[StackSort] Layout anchor: arrangeBtn (") + IntToStr(ac.left) + "," + IntToStr(ac.top) + " " +
              IntToStr(ac.width) + "x" + IntToStr(ac.height) + ")" + ", parent (" + IntToStr(pc.left) + "," +
              IntToStr(pc.top) + " " + IntToStr(pc.width) + "x" + IntToStr(pc.height) + ")" +
              (isBodyGUI ? " [body]" : ""));
@@ -266,7 +271,7 @@ void StackSortUI::InitializeUI(InventoryGUI* gui, MyGUI::Widget* arrangeBtn, Inv
     ui.initialized = true;
     UpdateCaption(idx);
 
-    InfoLog("[StackSort] UI initialized (target=" + IntToStr(ui.currentTarget) +
+    LogInfo("[StackSort] UI initialized (target=" + IntToStr(ui.currentTarget) +
             ", dim=" + ((SortWorker::GetDim() == Packer::TARGET_H) ? "H" : "W") + ")");
 }
 
@@ -297,9 +302,9 @@ void StackSortUI::FirstClickInit(int uiIdx)
 
     if (anyConsolidated)
     {
-        InfoLog("[StackSort] Consolidated stacks, triggering re-snapshot");
+        LogInfo("[StackSort] Consolidated stacks, triggering re-snapshot");
         SortWorker::OnMutation(ui.ownerGUI);
-        ((InventoryGUIAccess*)ui.gui)->refreshAllSections();
+        ForceRefreshAllSections(ui.gui);
     }
 
     // Capture original positions for right-click revert

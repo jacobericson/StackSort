@@ -81,7 +81,7 @@ void CatalogDump::Init()
     s_out.open(path.c_str(), std::ios::out | std::ios::app);
     if (!s_out.is_open())
     {
-        ErrorLog("[CatalogDump] Failed to open " + path);
+        LogError("[CatalogDump] Failed to open " + path);
         return;
     }
 
@@ -93,7 +93,7 @@ void CatalogDump::Init()
 
     s_inited = true;
 
-    InfoLog("[CatalogDump] initialized (" + IntToStr((int)s_seen.size()) + " known, " + path + ")");
+    LogInfo("[CatalogDump] initialized (" + IntToStr((int)s_seen.size()) + " known, " + path + ")");
 }
 
 static void ScanInv(Inventory* inv)

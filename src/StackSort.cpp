@@ -73,7 +73,7 @@ void StackSort_InitRotateAPI()
     HMODULE hMod = GetModuleHandleA("KenshiRotate.dll");
     if (!hMod)
     {
-        InfoLog("[StackSort] KenshiRotate not detected (rotation disabled)");
+        LogInfo("[StackSort] KenshiRotate not detected (rotation disabled)");
         return;
     }
 
@@ -85,19 +85,19 @@ void StackSort_InitRotateAPI()
 
     if (!s_krApiVersion || !s_krIsRotated || !s_krCanRotate || !s_krSetRotated)
     {
-        ErrorLog("[StackSort] KenshiRotate found but missing API exports (rotation disabled)");
+        LogError("[StackSort] KenshiRotate found but missing API exports (rotation disabled)");
         return;
     }
 
     int ver = s_krApiVersion();
     if (ver < 1)
     {
-        ErrorLog("[StackSort] KenshiRotate API version " + IntToStr(ver) + " < 1 (rotation disabled)");
+        LogError("[StackSort] KenshiRotate API version " + IntToStr(ver) + " < 1 (rotation disabled)");
         return;
     }
 
     s_krAvailable = true;
-    InfoLog("[StackSort] KenshiRotate detected (API v" + IntToStr(ver) + ", rotation enabled)");
+    LogInfo("[StackSort] KenshiRotate detected (API v" + IntToStr(ver) + ", rotation enabled)");
 }
 
 bool StackSort_RotateAvailable()
@@ -169,7 +169,7 @@ static void hook_show(InventoryGUI* thisptr, bool on)
     {
         if (SortWorker::HasContext(thisptr))
         {
-            InfoLog("[StackSort] Inventory closed");
+            LogInfo("[StackSort] Inventory closed");
             SortWorker::OnInventoryClosed(thisptr);
             StackSortUI::OnClose(thisptr);
         }
@@ -217,7 +217,7 @@ static void hook_update(InventoryGUI* thisptr)
     // inventory changes but our context still references the old one.
     if (SortWorker::HasContext(thisptr) && !SortWorker::ContextMatchesInventory(thisptr))
     {
-        InfoLog("[StackSort] Stale context detected, resetting");
+        LogInfo("[StackSort] Stale context detected, resetting");
         SortWorker::OnInventoryClosed(thisptr);
         StackSortUI::OnClose(thisptr);
         if (thisptr->childInventory) StackSortUI::OnClose(thisptr->childInventory);
@@ -261,37 +261,37 @@ static void hook_sectionRemoveItemCallback(Inventory* thisptr, Item* item)
 
 __declspec(dllexport) void startPlugin()
 {
-    InfoLog("[StackSort] Starting plugin v0.7.0...");
+    LogInfo("[StackSort] Starting plugin v0.7.0...");
 
     // Hook 1: autoArrangeButton — replace vanilla sort
     if (KenshiLib::SUCCESS != KenshiLib::AddHook((void*)KenshiLib::GetRealAddress(&InventoryGUI::autoArrangeButton),
                                                  (void*)hook_autoArrangeButton, (void**)&orig_autoArrangeButton))
     {
-        ErrorLog("[StackSort] FATAL: Failed to hook autoArrangeButton");
+        LogError("[StackSort] FATAL: Failed to hook autoArrangeButton");
         return;
     }
-    InfoLog("[StackSort] Hooked autoArrangeButton OK");
+    LogInfo("[StackSort] Hooked autoArrangeButton OK");
 
     // Hook 2: show — inventory close detection
     if (KenshiLib::SUCCESS != KenshiLib::AddHook((void*)KenshiLib::GetRealAddress(&InventoryGUI::_NV_show),
                                                  (void*)hook_show, (void**)&orig_show))
     {
-        ErrorLog("[StackSort] WARNING: Failed to hook show (non-fatal)");
+        LogError("[StackSort] WARNING: Failed to hook show (non-fatal)");
     }
     else
     {
-        InfoLog("[StackSort] Hooked show OK");
+        LogInfo("[StackSort] Hooked show OK");
     }
 
     // Hook 3: _NV_update — open detection + worker poll
     if (KenshiLib::SUCCESS != KenshiLib::AddHook((void*)KenshiLib::GetRealAddress(&InventoryGUI::_NV_update),
                                                  (void*)hook_update, (void**)&orig_update))
     {
-        ErrorLog("[StackSort] WARNING: Failed to hook _NV_update (non-fatal)");
+        LogError("[StackSort] WARNING: Failed to hook _NV_update (non-fatal)");
     }
     else
     {
-        InfoLog("[StackSort] Hooked _NV_update OK");
+        LogInfo("[StackSort] Hooked _NV_update OK");
     }
 
     // Hook 4: _sectionAddItemCallback — mutation detection
@@ -299,11 +299,11 @@ __declspec(dllexport) void startPlugin()
         KenshiLib::AddHook((void*)KenshiLib::GetRealAddress(&Inventory::_NV__sectionAddItemCallback),
                            (void*)hook_sectionAddItemCallback, (void**)&orig_sectionAddCb))
     {
-        ErrorLog("[StackSort] WARNING: Failed to hook sectionAddItemCallback (non-fatal)");
+        LogError("[StackSort] WARNING: Failed to hook sectionAddItemCallback (non-fatal)");
     }
     else
     {
-        InfoLog("[StackSort] Hooked sectionAddItemCallback OK");
+        LogInfo("[StackSort] Hooked sectionAddItemCallback OK");
     }
 
     // Hook 5: _sectionRemoveItemCallback — mutation detection
@@ -311,14 +311,14 @@ __declspec(dllexport) void startPlugin()
         KenshiLib::AddHook((void*)KenshiLib::GetRealAddress(&Inventory::_NV__sectionRemoveItemCallback),
                            (void*)hook_sectionRemoveItemCallback, (void**)&orig_sectionRemoveCb))
     {
-        ErrorLog("[StackSort] WARNING: Failed to hook sectionRemoveItemCallback (non-fatal)");
+        LogError("[StackSort] WARNING: Failed to hook sectionRemoveItemCallback (non-fatal)");
     }
     else
     {
-        InfoLog("[StackSort] Hooked sectionRemoveItemCallback OK");
+        LogInfo("[StackSort] Hooked sectionRemoveItemCallback OK");
     }
 
-    InfoLog("[StackSort] Plugin loaded successfully (5 hooks)");
+    LogInfo("[StackSort] Plugin loaded successfully (5 hooks)");
 
     // Initialize subsystems
     ResultCache::Init();
@@ -339,11 +339,11 @@ __declspec(dllexport) void startPlugin()
                                                       "PEAUAkCallbackInfo@@@ZPEAXKPEAUAkExternalSourceInfo@@K@Z");
             if (s_akPostEvent)
             {
-                InfoLog("[StackSort] AK::SoundEngine::PostEvent resolved");
+                LogInfo("[StackSort] AK::SoundEngine::PostEvent resolved");
             }
             else
             {
-                ErrorLog("[StackSort] WARNING: AK::SoundEngine::PostEvent not found (no click sound)");
+                LogError("[StackSort] WARNING: AK::SoundEngine::PostEvent not found (no click sound)");
             }
         }
     }

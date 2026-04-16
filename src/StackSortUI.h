@@ -32,6 +32,10 @@ class StackSortUI
     // captions on all open UIs after changing the active dim.
     static void RefreshAllCaptions();
 
+    // Bypass protected access on InventoryGUI::refreshAllSections. Defined in
+    // StackSortUI.cpp so callers don't need the kenshi/gui/InventoryGUI.h header.
+    static void ForceRefreshAllSections(InventoryGUI* gui);
+
   private:
     static void InitializeUI(InventoryGUI* gui, MyGUI::Widget* arrangeBtn, InventoryGUI* ownerGUI);
     static void OnBackClick(MyGUI::Widget* sender);
