@@ -16,9 +16,17 @@ DEFAULT_BIN     = os.path.join(SCRIPT_DIR, "harness", "bin", "stacksort_bench.ex
 
 
 def run_one(bench_bin, corpus_dir, config_path, rotate, base_seed, seeds,
-            refine, out_path, timeout):
-    """Returns (name, rotate, rc, elapsed, stderr)."""
+            refine, out_path, timeout, affinity_mask=None):
+    """Returns (name, rotate, rc, elapsed, stderr).
+
+    affinity_mask: optional DWORD_PTR mask passed as STACKSORT_PROFILE_AFFINITY
+    so parallel profile shards can pin to distinct cores. The harness only
+    acts on it when built with STACKSORT_PROFILE."""
     name = os.path.splitext(os.path.basename(config_path))[0]
+    env = None
+    if affinity_mask is not None:
+        env = os.environ.copy()
+        env["STACKSORT_PROFILE_AFFINITY"] = hex(affinity_mask)
     t0 = time.time()
     try:
         result = subprocess.run(
@@ -33,6 +41,7 @@ def run_one(bench_bin, corpus_dir, config_path, rotate, base_seed, seeds,
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=env,
         )
         rc = result.returncode
         stderr = result.stderr
@@ -69,15 +78,16 @@ def main():
                     help="Parallel workers (default: CPU count). "
                          "wall_clock_ms is slightly noisier under full load; "
                          "drop to CPU count - 4 if comparing timings run-to-run.")
-    ap.add_argument("--seed-shards", type=int, default=1,
+    ap.add_argument("--seed-shards", type=int, default=0,
                     help="Split each (config x rotation) job into N shards by "
                          "seed range. Each shard runs disjoint seeds [base..base+n) "
-                         "and writes a separate CSV (e.g. tag_config_rot0_s0.csv). "
+                         "and writes a separate CSV (e.g. <tag>/config_rot0_s0.csv). "
                          "analyze.py reads them all via glob. Multiplies the "
                          "parallelism for slow configs (e.g. high restart counts). "
                          "Requires the harness to emit absolute seed in the seed "
                          "column so shards don't collide on (config,inst,target,seed) "
-                         "groupby keys.")
+                         "groupby keys. Default 0 = match --workers so a single "
+                         "config x rotation fills all worker threads.")
     ap.add_argument("--timeout", type=int, default=3600,
                     help="Per-subprocess timeout in seconds (default 3600). "
                          "Bump for very slow ablations (high restarts, low plateau).")
@@ -86,7 +96,10 @@ def main():
     ap.add_argument("--out-dir", default=DEFAULT_OUT)
     ap.add_argument("--bench", default=DEFAULT_BIN)
     ap.add_argument("--tag", default="run",
-                    help="Prefix for output CSV filenames (default 'run')")
+                    help="Subdirectory under --out-dir that holds this run's "
+                         "output CSVs (default 'run'). CSV filenames are "
+                         "'<config>_rot<N>[_s<N>].csv' — the tag lives in the "
+                         "path, not the filename.")
     ap.add_argument("--rotations", default="0,1",
                     help="Comma-separated rotation modes (default '0,1')")
     ap.add_argument("--refine", type=int, default=1,
@@ -96,7 +109,20 @@ def main():
                     help="Comma-separated config name allowlist (e.g. "
                          "'grouping_power_5,restarts_16'). Matches the file "
                          "stem. Empty = run all configs in --configs dir.")
+    ap.add_argument("--pin-shards", action="store_true",
+                    help="Pin each parallel shard to its own CPU core via "
+                         "STACKSORT_PROFILE_AFFINITY=1<<(pin_base+job_idx). "
+                         "Keeps TSC clean under parallel profile runs; the "
+                         "harness only acts on the env var when built with "
+                         "STACKSORT_PROFILE.")
+    ap.add_argument("--pin-base-core", type=int, default=0,
+                    help="First core used when --pin-shards is set. Pair "
+                         "two run_matrix invocations on a 16-core machine "
+                         "by offsetting one of them.")
     args = ap.parse_args()
+
+    if args.seed_shards <= 0:
+        args.seed_shards = max(1, min(args.workers, args.seeds))
 
     if not os.path.exists(args.bench):
         print("ERROR: harness binary not found: {}".format(args.bench),
@@ -120,7 +146,8 @@ def main():
 
     rotations = [int(r.strip()) for r in args.rotations.split(",") if r.strip()]
 
-    os.makedirs(args.out_dir, exist_ok=True)
+    tag_dir = os.path.join(args.out_dir, args.tag)
+    os.makedirs(tag_dir, exist_ok=True)
 
     jobs = []
     for rot in rotations:
@@ -130,19 +157,28 @@ def main():
             for s_idx, (base_seed, n_seeds) in enumerate(shards):
                 if args.seed_shards > 1:
                     out_path = os.path.join(
-                        args.out_dir,
-                        "{}_{}_rot{}_s{}.csv".format(args.tag, name, rot, s_idx))
+                        tag_dir,
+                        "{}_rot{}_s{}.csv".format(name, rot, s_idx))
                 else:
                     out_path = os.path.join(
-                        args.out_dir,
-                        "{}_{}_rot{}.csv".format(args.tag, name, rot))
+                        tag_dir,
+                        "{}_rot{}.csv".format(name, rot))
                 jobs.append((cfg, rot, base_seed, n_seeds, out_path))
+
+    # Optional per-shard CPU pinning. Map each job to a distinct core. If
+    # there are more jobs than cores, masks wrap — collisions just mean
+    # those shards queue on the same core instead of migrating.
+    cpu_count = os.cpu_count() or 8
+    job_affinities = [None] * len(jobs)
+    if args.pin_shards:
+        for i in range(len(jobs)):
+            job_affinities[i] = 1 << ((args.pin_base_core + i) % cpu_count)
 
     shard_note = " x {} shards".format(args.seed_shards) if args.seed_shards > 1 else ""
     print("Running {} jobs ({} configs x {} rotations{}), {} seeds, refine={}, {} workers, timeout={}s".format(
         len(jobs), len(config_files), len(rotations), shard_note,
         args.seeds, args.refine, args.workers, args.timeout))
-    print("Output directory: {}".format(args.out_dir))
+    print("Output directory: {}".format(tag_dir))
     print("")
 
     t0 = time.time()
@@ -151,8 +187,9 @@ def main():
     with cf.ThreadPoolExecutor(max_workers=args.workers) as ex:
         futures = {
             ex.submit(run_one, args.bench, args.corpus, cfg, rot,
-                      base_seed, n_seeds, args.refine, out_path, args.timeout): (cfg, rot)
-            for (cfg, rot, base_seed, n_seeds, out_path) in jobs
+                      base_seed, n_seeds, args.refine, out_path, args.timeout,
+                      job_affinities[i]): (cfg, rot)
+            for i, (cfg, rot, base_seed, n_seeds, out_path) in enumerate(jobs)
         }
         for fut in cf.as_completed(futures):
             name, rot, rc, elapsed, stderr = fut.result()
