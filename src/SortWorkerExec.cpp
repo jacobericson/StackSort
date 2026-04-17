@@ -98,6 +98,9 @@ void SortWorker::ExecuteJob(Job* job, int workerIdx)
 {
     JobCleanup cleanup(workerIdx, &job->abortFlag);
 
+    // Shared across every Pack call in this job so scratch allocations amortize.
+    Packer::PackContext sharedCtx;
+
     SectionRef& ref = job->section;
 
     CachedSection* cs = ResultCache::Find(ref.key);
@@ -156,9 +159,9 @@ void SortWorker::ExecuteJob(Job* job, int workerIdx)
             int skipThreshold = (t <= maxLerSideCovered) ? globalBestLERArea : 0;
 
             std::vector<Packer::Item> newBestOrder;
-            Packer::Result result =
-                Packer::PackAnnealed(gridW, gridH, packItemsLocal, dim, t, &job->abortFlag,
-                                     lastBestOrder.empty() ? NULL : &lastBestOrder, &newBestOrder, skipThreshold);
+            Packer::Result result = Packer::PackAnnealed(gridW, gridH, packItemsLocal, dim, t, &job->abortFlag,
+                                                         lastBestOrder.empty() ? NULL : &lastBestOrder, &newBestOrder,
+                                                         skipThreshold, NULL, NULL, &sharedCtx);
 
             QueryPerformanceCounter(&t1);
 
@@ -348,8 +351,9 @@ void SortWorker::ExecuteJob(Job* job, int workerIdx)
         QueryPerformanceCounter(&t0);
 
         std::vector<Packer::Item> newBestOrder;
-        Packer::Result refined = Packer::PackAnnealed(gridW, gridH, packItemsLocal, dim, target, &job->abortFlag,
-                                                      hasSeed ? &seedCopy : NULL, &newBestOrder, 0, &refineParams);
+        Packer::Result refined =
+            Packer::PackAnnealed(gridW, gridH, packItemsLocal, dim, target, &job->abortFlag, hasSeed ? &seedCopy : NULL,
+                                 &newBestOrder, 0, &refineParams, NULL, &sharedCtx);
 
         QueryPerformanceCounter(&t1);
 

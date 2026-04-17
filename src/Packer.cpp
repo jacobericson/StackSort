@@ -34,12 +34,20 @@ void Packer::InitPackContext(PackContext& ctx, int gridW, int gridH, int numItem
     ctx.placements.reserve(numItems);
     ctx.grid.resize(totalCells);
     ctx.visited.resize(totalCells);
+    // A reused ctx may carry 1s from a prior flood fill; reset for the
+    // visited-guarded concentration/stranded scans.
+    memset(&ctx.visited[0], 0, totalCells);
     ctx.heights.resize(gridW);
     ctx.lerStack.reserve(gridW + 1);
     ctx.floodStack.reserve(totalCells);
     ctx.regionAreas.reserve(16);
+    ctx.regionInterior.reserve(16);
+    ctx.regionHasLer.reserve(16);
     ctx.wasteRects.reserve(numItems * 2);
     ctx.placementIdGrid.resize(totalCells);
+    ctx.bssfPl.reserve(numItems);
+    ctx.seedPl.reserve(numItems);
+    ctx.bestPl.reserve(numItems);
     ctx.skylineWasteCoef = DEFAULT_SKYLINE_WASTE_COEF;
 }
 
@@ -68,16 +76,16 @@ int Packer::CountRotated(const std::vector<Placement>& placements)
 }
 
 Packer::Result Packer::Pack(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim, int target,
-                            volatile long* abortFlag)
+                            volatile long* abortFlag, PackContext* reuseCtx)
 {
-    if (dim == TARGET_H) return PackH(gridW, gridH, items, target, abortFlag);
+    if (dim == TARGET_H) return PackH(gridW, gridH, items, target, abortFlag, reuseCtx);
 
     // W-mode: transpose, run H-mode, transpose back.
     std::vector<Item> itemsT = items;
     for (size_t i = 0; i < itemsT.size(); ++i)
         std::swap(itemsT[i].w, itemsT[i].h);
 
-    Result r = PackH(gridH, gridW, itemsT, target, abortFlag);
+    Result r = PackH(gridH, gridW, itemsT, target, abortFlag, reuseCtx);
 
     for (size_t i = 0; i < r.placements.size(); ++i)
     {
@@ -90,7 +98,8 @@ Packer::Result Packer::Pack(int gridW, int gridH, const std::vector<Item>& items
     return r;
 }
 
-Packer::Result Packer::PackH(int gridW, int gridH, const std::vector<Item>& items, int target, volatile long* abortFlag)
+Packer::Result Packer::PackH(int gridW, int gridH, const std::vector<Item>& items, int target, volatile long* abortFlag,
+                             PackContext* reuseCtx)
 {
     Result result;
     result.lerArea       = 0;
@@ -107,7 +116,8 @@ Packer::Result Packer::PackH(int gridW, int gridH, const std::vector<Item>& item
     std::vector<Item> sorted = items;
     SortItems(sorted);
 
-    PackContext ctx;
+    PackContext localCtx;
+    PackContext& ctx = reuseCtx ? *reuseCtx : localCtx;
     InitPackContext(ctx, gridW, gridH, (int)items.size());
 
     MaxRectsPack(ctx, gridW, gridH, sorted, target, abortFlag, 0, 0, 0);

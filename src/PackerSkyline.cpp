@@ -136,11 +136,10 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         // Find best position: minimize y (bottom-left), then minimize waste.
         // When reserveW > 0: single pass with per-position ceiling constraint.
         // When reserveW == 0: two-pass (pass 0 = above reserve, pass 1 = anywhere).
-        int bestY       = INT_MAX;
-        int bestWaste   = INT_MAX;
-        int bestContact = 0;
-        int bestX       = -1;
-        int bestSi      = -1;
+        int bestY              = INT_MAX;
+        long long bestCombined = LLONG_MAX;
+        int bestX              = -1;
+        int bestSi             = -1;
         int bestW = 0, bestH = 0;
         bool bestRotated = false;
         int curType      = items[idx].itemTypeId;
@@ -153,9 +152,8 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
 
             if (pass == 1)
             {
-                bestY       = INT_MAX;
-                bestWaste   = INT_MAX;
-                bestContact = 0;
+                bestY        = INT_MAX;
+                bestCombined = LLONG_MAX;
             }
 
             for (int ori = 0; ori < numOri; ++ori)
@@ -258,23 +256,21 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                     // Contact = SharedBorder sum. coef contact points offset
                     // 1 waste cell. coef defaults to 3 (1/3 value); tunable
                     // via SearchParams.skylineWasteCoef → ctx.skylineWasteCoef.
-                    // long long to survive bestWaste = INT_MAX sentinel.
-                    long long combined     = (long long)waste * ctx.skylineWasteCoef - contact;
-                    long long bestCombined = (long long)bestWaste * ctx.skylineWasteCoef - bestContact;
+                    // long long so (waste * coef) can't overflow int; bestCombined uses LLONG_MAX.
+                    long long combined = (long long)waste * ctx.skylineWasteCoef - contact;
 
                     bool isBetter = (maxY < bestY) || (maxY == bestY && combined < bestCombined) ||
                                     (maxY == bestY && combined == bestCombined && iw >= ih && !(bestW >= bestH));
 
                     if (isBetter)
                     {
-                        bestY       = maxY;
-                        bestWaste   = waste;
-                        bestContact = contact;
-                        bestX       = x;
-                        bestSi      = (int)si;
-                        bestW       = iw;
-                        bestH       = ih;
-                        bestRotated = (ori != 0);
+                        bestY        = maxY;
+                        bestCombined = combined;
+                        bestX        = x;
+                        bestSi       = (int)si;
+                        bestW        = iw;
+                        bestH        = ih;
+                        bestRotated  = (ori != 0);
                     }
                 }
             }

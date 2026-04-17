@@ -52,8 +52,10 @@ class Packer
     // Run the full packing pipeline: sort, MAXRECTS place, compute LER, score.
     // If abortFlag is non-NULL, checked per-item; returns partial result on abort.
     // W-mode transposes internally, so placements/LER come back in original space.
+    struct PackContext; // forward decl; full definition below
+
     static Result Pack(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim, int target,
-                       volatile long* abortFlag = NULL);
+                       volatile long* abortFlag = NULL, PackContext* reuseCtx = NULL);
 
     // Compute the Largest Empty Rectangle on an occupancy grid.
     // grid is W*H unsigned chars, 0 = empty, nonzero = occupied.
@@ -198,9 +200,11 @@ class Packer
     static Result PackAnnealed(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim, int target,
                                volatile long* abortFlag = NULL, const std::vector<Item>* seedOrder = NULL,
                                std::vector<Item>* outBestOrder = NULL, int skipLAHCIfAreaBelow = 0,
-                               const SearchParams* params = NULL, PackDiagnostics* outDiag = NULL);
+                               const SearchParams* params = NULL, PackDiagnostics* outDiag = NULL,
+                               PackContext* reuseCtx = NULL);
 
-  private:
+    // Scratch-buffer support types. Public only so callers can declare a
+    // PackContext for reuseCtx — treat members as opaque.
     struct Rect
     {
         int x;
@@ -222,8 +226,9 @@ class Packer
         int height;
     };
 
-    // Reusable scratch buffers for the packing hot path.
-    // Stack-local per PackAnnealed/Pack call — thread-safe by design.
+    // Reusable scratch buffers for the packing hot path. Construct once
+    // per job; pass via Pack/PackAnnealed's reuseCtx to amortize
+    // allocations. Not thread-safe — each worker needs its own.
     struct PackContext
     {
         std::vector<Rect> freeRects;
@@ -243,21 +248,28 @@ class Packer
         std::vector<Rect> wasteRects;            // Skyline waste map (under-cliff gaps)
         std::vector<int> placementIdGrid;        // SkylinePack: placement index per cell (-1 = empty)
 
+        // LAHC scratch: greedy-seed and best-so-far placements.
+        std::vector<Placement> bssfPl;
+        std::vector<Placement> seedPl;
+        std::vector<Placement> bestPl;
+
         // Tunables resolved per-pack from SearchParams. Populated in
         // PackAnnealedH/PackH before calling SkylinePack so the inner loop
         // doesn't take an extra parameter.
         int skylineWasteCoef;
     };
 
+  private:
     // H-mode implementations of Pack/PackAnnealed. The public Pack/PackAnnealed
     // dispatch here directly for TARGET_H and via a transpose wrapper for TARGET_W.
     static Result PackH(int gridW, int gridH, const std::vector<Item>& items, int target,
-                        volatile long* abortFlag = NULL);
+                        volatile long* abortFlag = NULL, PackContext* reuseCtx = NULL);
 
     static Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int target,
                                 volatile long* abortFlag = NULL, const std::vector<Item>* seedOrder = NULL,
                                 std::vector<Item>* outBestOrder = NULL, int skipLAHCIfAreaBelow = 0,
-                                const SearchParams* params = NULL, PackDiagnostics* outDiag = NULL);
+                                const SearchParams* params = NULL, PackDiagnostics* outDiag = NULL,
+                                PackContext* reuseCtx = NULL);
 
     static void InitPackContext(PackContext& ctx, int gridW, int gridH, int numItems);
 
