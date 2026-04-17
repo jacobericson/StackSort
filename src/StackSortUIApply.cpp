@@ -404,12 +404,13 @@ bool StackSortUI::RevertInventory(InventoryGUI* gui)
                 if (!matched[j] && currentPtrs[j] == op.item)
                 {
                     Packer::Placement p;
-                    p.id      = (int)itemPtrs.size();
-                    p.x       = op.x;
-                    p.y       = op.y;
-                    p.w       = op.w;
-                    p.h       = op.h;
-                    p.rotated = false;
+                    p.id         = (int)itemPtrs.size();
+                    p.itemTypeId = 0;
+                    p.x          = op.x;
+                    p.y          = op.y;
+                    p.w          = op.w;
+                    p.h          = op.h;
+                    p.rotated    = false;
                     result.placements.push_back(p);
                     itemPtrs.push_back(op.item);
                     matched[j] = true;

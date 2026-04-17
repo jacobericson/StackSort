@@ -3,9 +3,38 @@
 #include <climits>
 #include <cstring>
 
+#ifdef STACKSORT_PROFILE
+#include <intrin.h>
+#pragma intrinsic(__rdtsc)
+#endif
+
 // Maximum adjacent same-type placements to track per candidate position.
 // Bounded by the number of items that can physically touch a single item.
 static const int MAX_ADJ = 16;
+
+// placeW == 0 is the no-placement sentinel; boundaries must still advance
+// in lock-step with idx for unfittable items so index = placements.size()+
+// unfittable_count invariant holds.
+static void EmitBoundary(Packer::PackContext& ctx, int gridW, int placeX, int placeY, int placeW, int placeH)
+{
+    Packer::SkylineBoundary b;
+    b.placementsCount = (int)ctx.placements.size();
+    b.wasteStart      = (int)ctx.skylineSnapWaste.size();
+    b.wasteCount      = (int)ctx.wasteRects.size();
+    ctx.skylineSnapWaste.insert(ctx.skylineSnapWaste.end(), ctx.wasteRects.begin(), ctx.wasteRects.end());
+    b.skylineStart = (int)ctx.skylineSnapSkyline.size();
+    b.skylineCount = (int)ctx.skyline.size();
+    ctx.skylineSnapSkyline.insert(ctx.skylineSnapSkyline.end(), ctx.skyline.begin(), ctx.skyline.end());
+    b.gridDeltaStart = (int)ctx.skylineSnapGridDelta.size();
+    if (placeW > 0)
+    {
+        for (int dy = 0; dy < placeH; ++dy)
+            for (int dx = 0; dx < placeW; ++dx)
+                ctx.skylineSnapGridDelta.push_back((placeY + dy) * gridW + (placeX + dx));
+    }
+    b.gridDeltaCount = (int)ctx.skylineSnapGridDelta.size() - b.gridDeltaStart;
+    ctx.skylineSnapBoundaries.push_back(b);
+}
 
 void Packer::CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>& items, int curType, int start,
                                  int step, int count, int* adjPids, int& numAdj, int maxAdj)
@@ -13,7 +42,7 @@ void Packer::CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>
     for (int i = 0; i < count; ++i)
     {
         int pidx = ctx.placementIdGrid[start + i * step];
-        if (pidx < 0 || items[ctx.placements[pidx].id].itemTypeId != curType) continue;
+        if (pidx < 0 || ctx.placements[pidx].itemTypeId != curType) continue;
         bool dup = false;
         for (int k = 0; k < numAdj; ++k)
             if (adjPids[k] == pidx)
@@ -31,30 +60,59 @@ void Packer::CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>
 // reserveW == 0: two-pass soft reserve (prefer above reserveY, fallback anywhere).
 
 void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vector<Item>& items, int target,
-                         volatile long* abortFlag, int reserveX, int reserveW)
+                         volatile long* abortFlag, int reserveX, int reserveW, int startIdx)
 {
-    ctx.placements.clear();
-    ctx.skyline.clear();
-
-    SkylineNode initial;
-    initial.x     = 0;
-    initial.y     = 0;
-    initial.width = gridW;
-    ctx.skyline.push_back(initial);
-
-    int reserveY = gridH - target;
-    ctx.wasteRects.clear();
-
-    // Placement ID grid for contact-point scoring: tracks which placement
-    // occupies each cell (-1 = empty). Used to find same-type neighbors
-    // when evaluating candidate positions.
+    int reserveY   = gridH - target;
     int totalCells = gridW * gridH;
-    ctx.placementIdGrid.resize(totalCells);
-    memset(&ctx.placementIdGrid[0], 0xFF, totalCells * sizeof(int));
 
-    for (size_t idx = 0; idx < items.size(); ++idx)
+    if (startIdx == 0)
     {
-        if (abortFlag && *abortFlag != 0) return;
+        ctx.placements.clear();
+        ctx.skyline.clear();
+
+        SkylineNode initial;
+        initial.x     = 0;
+        initial.y     = 0;
+        initial.width = gridW;
+        ctx.skyline.push_back(initial);
+
+        ctx.wasteRects.clear();
+
+        // Empty sentinel is -1 via 0xFF memset; CollectAdjacentPids treats
+        // any non-negative value as a real placement index.
+        ctx.placementIdGrid.resize(totalCells);
+        memset(&ctx.placementIdGrid[0], 0xFF, totalCells * sizeof(int));
+
+        ctx.skylineSnapBoundaries.clear();
+        ctx.skylineSnapWaste.clear();
+        ctx.skylineSnapSkyline.clear();
+        ctx.skylineSnapGridDelta.clear();
+        EmitBoundary(ctx, gridW, 0, 0, 0, 0);
+    }
+
+#ifdef STACKSORT_PROFILE
+    // Measures cycles spent on items [0..profSkylinePrefixK-1]. Those would
+    // be skipped by a Phase-3-style partial recompute. Set prefixK<=0 to
+    // skip the measurement (cold seed / restart seed calls).
+    unsigned long long _sklStartTsc = __rdtsc();
+    int _prefixK                    = ctx.profSkylinePrefixK;
+#endif
+
+    for (size_t idx = (size_t)startIdx; idx < items.size(); ++idx)
+    {
+        if (abortFlag && *abortFlag != 0)
+        {
+            ctx.skylineSnapValid = false;
+            return;
+        }
+
+#ifdef STACKSORT_PROFILE
+        if ((int)idx == _prefixK)
+        {
+            unsigned long long _now = __rdtsc();
+            ctx.profSkylinePrefixCycles += (long long)(_now - _sklStartTsc);
+        }
+#endif
 
         const Item& item = items[idx];
 
@@ -88,12 +146,13 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         {
             const Rect& wr = ctx.wasteRects[bestWasteIdx];
             Placement p;
-            p.id      = item.id;
-            p.x       = wr.x;
-            p.y       = wr.y;
-            p.w       = wasteW;
-            p.h       = wasteH;
-            p.rotated = wasteRotated;
+            p.id         = item.id;
+            p.itemTypeId = item.itemTypeId;
+            p.x          = wr.x;
+            p.y          = wr.y;
+            p.w          = wasteW;
+            p.h          = wasteH;
+            p.rotated    = wasteRotated;
             ctx.placements.push_back(p);
 
             // Fill placement ID grid for contact-point scoring
@@ -127,6 +186,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                 r.h = remBottomH;
                 ctx.wasteRects.push_back(r);
             }
+            EmitBoundary(ctx, gridW, p.x, p.y, p.w, p.h);
             continue; // placed in waste — skip skyline search
         }
 
@@ -276,16 +336,21 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
             }
         }
 
-        if (bestX < 0) continue; // Item doesn't fit
+        if (bestX < 0)
+        {
+            EmitBoundary(ctx, gridW, 0, 0, 0, 0);
+            continue; // Item doesn't fit
+        }
 
         // Place item
         Placement p;
-        p.id      = item.id;
-        p.x       = bestX;
-        p.y       = bestY;
-        p.w       = bestW;
-        p.h       = bestH;
-        p.rotated = bestRotated;
+        p.id         = item.id;
+        p.itemTypeId = item.itemTypeId;
+        p.x          = bestX;
+        p.y          = bestY;
+        p.w          = bestW;
+        p.h          = bestH;
+        p.rotated    = bestRotated;
         ctx.placements.push_back(p);
 
         // Fill placement ID grid for contact-point scoring
@@ -385,5 +450,10 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                 ctx.skyline.push_back(ctx.skylineTmp[si]);
             }
         }
+
+        EmitBoundary(ctx, gridW, bestX, bestY, bestW, bestH);
     }
+
+    ctx.skylineSnapN     = (int)items.size();
+    ctx.skylineSnapValid = true;
 }

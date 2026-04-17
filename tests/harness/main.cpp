@@ -214,6 +214,8 @@ static std::vector<std::string> BuildHeader()
     h.push_back("scoring_grouping_power_quarters");
     h.push_back("skyline_waste_coef");
     h.push_back("grouping_borders_raw");
+    h.push_back("fp_skyline_snap_hits");
+    h.push_back("fp_skyline_snap_probes");
 #ifdef STACKSORT_PROFILE
     h.push_back("fp_cycles_move_gen");
     h.push_back("fp_cycles_skyline_pack");
@@ -223,6 +225,16 @@ static std::vector<std::string> BuildHeader()
     h.push_back("fp_cycles_stranded");
     h.push_back("fp_cycles_score");
     h.push_back("fp_cycles_accept");
+    h.push_back("fp_cycles_pre_reservation");        // per-run: reserve-width probe loop
+    h.push_back("fp_cycles_greedy_seed");            // per-run: BSSF + BAF + selection
+    h.push_back("fp_cycles_unconstrained_fallback"); // per-run: optional fallback PackH
+    h.push_back("fp_cycles_optimize_grouping");      // per-run: post-LAHC same-footprint swap
+    h.push_back("fp_cycles_borders_raw");            // per-run: final cross-power clustering metric
+    h.push_back("fp_kept_prefix_sum");
+    h.push_back("fp_kept_prefix_count");
+    h.push_back("fp_grid_hash_probes");
+    h.push_back("fp_grid_hash_hits");
+    h.push_back("fp_cycles_skyline_prefix");
 #endif
     return h;
 }
@@ -233,10 +245,17 @@ int main(int argc, char** argv)
     if (!ParseArgs(argc, argv, args)) return 1;
 
 #ifdef STACKSORT_PROFILE
-    // Pin to a single core so per-phase rdtsc samples all come from the
-    // same TSC domain. Invariant TSC is standard on Nehalem+ but pinning
-    // eliminates scheduler migration as a noise source for profiling runs.
-    SetProcessAffinityMask(GetCurrentProcess(), 1);
+    // Default: pin to core 1 so rdtsc deltas stay on one TSC domain.
+    // STACKSORT_PROFILE_AFFINITY=<mask> overrides; set to a hex mask per
+    // shard to spread parallel workers across distinct cores. Setting to
+    // "0" disables pinning entirely (relies on invariant TSC for cross-
+    // core consistency; adds migration noise but allows N-way parallelism).
+    {
+        const char* affEnv = getenv("STACKSORT_PROFILE_AFFINITY");
+        DWORD_PTR mask     = 1;
+        if (affEnv && *affEnv) mask = (DWORD_PTR)_strtoui64(affEnv, NULL, 0);
+        if (mask != 0) SetProcessAffinityMask(GetCurrentProcess(), mask);
+    }
 #endif
 
     // Load baseline first so ablation configs can inherit from it.
@@ -489,6 +508,8 @@ int main(int argc, char** argv)
                 row.push_back(IntToStr(resolvedGPQ));
                 row.push_back(IntToStr(resolvedSWC));
                 row.push_back(IntToStr(finalDiag.groupingBordersRaw));
+                row.push_back(IntToStr(firstDiag.skylineSnapHits));
+                row.push_back(IntToStr(firstDiag.skylineSnapProbes));
 #ifdef STACKSORT_PROFILE
                 row.push_back(IntToStr(firstDiag.profCyclesMoveGen));
                 row.push_back(IntToStr(firstDiag.profCyclesSkylinePack));
@@ -498,6 +519,16 @@ int main(int argc, char** argv)
                 row.push_back(IntToStr(firstDiag.profCyclesStranded));
                 row.push_back(IntToStr(firstDiag.profCyclesScore));
                 row.push_back(IntToStr(firstDiag.profCyclesAccept));
+                row.push_back(IntToStr(firstDiag.profCyclesPreReservation));
+                row.push_back(IntToStr(firstDiag.profCyclesGreedySeed));
+                row.push_back(IntToStr(firstDiag.profCyclesUnconstrainedFallback));
+                row.push_back(IntToStr(firstDiag.profCyclesOptimizeGrouping));
+                row.push_back(IntToStr(firstDiag.profCyclesBordersRaw));
+                row.push_back(IntToStr(firstDiag.keptPrefixSum));
+                row.push_back(IntToStr(firstDiag.keptPrefixCount));
+                row.push_back(IntToStr(firstDiag.gridHashProbes));
+                row.push_back(IntToStr(firstDiag.gridHashHits));
+                row.push_back(IntToStr(firstDiag.profCyclesSkylinePrefix));
 #endif
                 csv.WriteRow(row);
 

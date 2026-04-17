@@ -32,6 +32,12 @@ class Packer
         int w;
         int h;
         bool rotated; // true if packer swapped w/h relative to input
+        // CollectAdjacentPids cannot use items[p.id].itemTypeId for the
+        // type compare: SkylinePack receives a permuted `items` vector
+        // (curOrder), so items[p.id] is the item at position p.id in the
+        // current ordering, not the item with id == p.id. Carry the type
+        // in Placement instead.
+        int itemTypeId;
     };
 
     struct Result
@@ -163,6 +169,9 @@ class Packer
         // groupingBonus's scale changes with groupingPowerQuarters.
         long long groupingBordersRaw;
 
+        int skylineSnapHits;
+        int skylineSnapProbes;
+
 #ifdef STACKSORT_PROFILE
         // Per-phase rdtsc cycle accumulators across the LAHC inner loop.
         // Only populated in profiling builds; absent in production to keep
@@ -175,16 +184,42 @@ class Packer
         long long profCyclesStranded;
         long long profCyclesScore;
         long long profCyclesAccept;
+
+        // Once-per-run phases outside the LAHC inner loop. Useful for
+        // attributing total wall time on cold starts + deciding where
+        // optimization effort pays off. All populated in profile builds
+        // regardless of whether the phase fires (zero when skipped).
+        long long profCyclesPreReservation;        // reserve-width probe loop
+        long long profCyclesGreedySeed;            // BSSF + optional BAF + selection
+        long long profCyclesUnconstrainedFallback; // optional fallback PackH + rescore
+        long long profCyclesOptimizeGrouping;      // post-LAHC same-footprint swap
+        long long profCyclesBordersRaw;            // final cross-power clustering metric
+
+        // Sum/count instead of pre-computed rate so the harness can
+        // aggregate across runs without double-averaging.
+        long long keptPrefixSum;
+        int keptPrefixCount;
+        int gridHashProbes;
+        int gridHashHits;
+
+        // Skyline cycles spent on items [0..keptPrefix-1] — the slice a
+        // partial-recompute scheme could skip. Upper bound on Phase 3
+        // savings.
+        long long profCyclesSkylinePrefix;
 #endif
 
         PackDiagnostics()
             : bestFoundIter(0), bestFoundRestart(0), plateauBreaks(0), lahcItersExecuted(0), packCalls(0),
               unconstrainedFallbackWon(false), greedySeedScore(0), greedySeedLerArea(0), repairMoveRolls(0),
-              repairMoveScans(0), repairMoveHits(0), repairMoveAccepts(0), groupingBordersRaw(0)
+              repairMoveScans(0), repairMoveHits(0), repairMoveAccepts(0), groupingBordersRaw(0), skylineSnapHits(0),
+              skylineSnapProbes(0)
 #ifdef STACKSORT_PROFILE
               ,
               profCyclesMoveGen(0), profCyclesSkylinePack(0), profCyclesLer(0), profCyclesConcentration(0),
-              profCyclesGrouping(0), profCyclesStranded(0), profCyclesScore(0), profCyclesAccept(0)
+              profCyclesGrouping(0), profCyclesStranded(0), profCyclesScore(0), profCyclesAccept(0),
+              profCyclesPreReservation(0), profCyclesGreedySeed(0), profCyclesUnconstrainedFallback(0),
+              profCyclesOptimizeGrouping(0), profCyclesBordersRaw(0), keptPrefixSum(0), keptPrefixCount(0),
+              gridHashProbes(0), gridHashHits(0), profCyclesSkylinePrefix(0)
 #endif
         {
         }
@@ -226,6 +261,36 @@ class Packer
         int height;
     };
 
+    struct GridCacheEntry
+    {
+        // Twin 64-bit hash defeats birthday collisions that a single
+        // 64-bit would see ~1% over a full corpus run — required for
+        // bit-exact determinism across cache hits vs misses.
+        unsigned long long hashA;
+        unsigned long long hashB;
+        int lerArea;
+        int lerWidth;
+        int lerHeight;
+        int lerX;
+        int lerY;
+        double concentration;
+        int strandedCells;
+    };
+
+    // Entry[k] = state AFTER items[0..k-1] have been processed. placementsCount
+    // may be < k when some of those items were unfittable — the restore path
+    // must use placementsCount, not k, to resize ctx.placements.
+    struct SkylineBoundary
+    {
+        int placementsCount;
+        int wasteStart;
+        int wasteCount;
+        int skylineStart;
+        int skylineCount;
+        int gridDeltaStart;
+        int gridDeltaCount;
+    };
+
     // Reusable scratch buffers for the packing hot path. Construct once
     // per job; pass via Pack/PackAnnealed's reuseCtx to amortize
     // allocations. Not thread-safe — each worker needs its own.
@@ -257,6 +322,32 @@ class Packer
         // PackAnnealedH/PackH before calling SkylinePack so the inner loop
         // doesn't take an extra parameter.
         int skylineWasteCoef;
+
+        // FIFO ring. gridCacheCount == 0 is logically empty — stale
+        // array contents never matter, only overwritten on insert.
+        GridCacheEntry gridCache[64];
+        int gridCacheCount;
+        int gridCacheHead;
+
+        // skylineSnapValid must be false whenever the log does not
+        // correspond to the current curOrder — restart, abort, or
+        // cross-target ctx reuse.
+        std::vector<SkylineBoundary> skylineSnapBoundaries;
+        std::vector<Rect> skylineSnapWaste;
+        std::vector<SkylineNode> skylineSnapSkyline;
+        std::vector<int> skylineSnapGridDelta;
+        int skylineSnapN;
+        bool skylineSnapValid;
+
+#ifdef STACKSORT_PROFILE
+        // SkylinePack prefix-cycle measurement: caller writes the would-be
+        // Phase 3 kept-prefix into profSkylinePrefixK before each call;
+        // SkylinePack stamps TSC at entry and accumulates (tsc_at_item_k -
+        // tsc_start) into profSkylinePrefixCycles. 0 or negative values
+        // skip the measurement (cold seed / restart seed calls).
+        int profSkylinePrefixK;
+        long long profSkylinePrefixCycles;
+#endif
     };
 
   private:
@@ -296,8 +387,10 @@ class Packer
     // (reserveX, reserveY, reserveW, target) — hard constraint.
     // reserveW == 0 = existing soft two-pass reserve.
     // Writes results into ctx.placements.
+    // startIdx > 0 requires caller to have restored ctx state from a prior
+    // run's snapshot at boundary[startIdx].
     static void SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vector<Item>& items, int target,
-                            volatile long* abortFlag = NULL, int reserveX = 0, int reserveW = 0);
+                            volatile long* abortFlag = NULL, int reserveX = 0, int reserveW = 0, int startIdx = 0);
 
     // Build occupancy grid into ctx.grid (0=empty, 1=occupied).
     static void BuildOccupancyGrid(PackContext& ctx, int gridW, int gridH);
@@ -325,6 +418,13 @@ class Packer
     // 4-connected empty space. Shared between the fused scorer above and
     // the repair_move branch in PackAnnealedH.
     static void FloodFillFromLer(PackContext& ctx, int gridW, int gridH, int lerX, int lerY, int lerW, int lerH);
+
+    // Hashes ctx.grid (caller must have built it via BuildOccupancyGrid),
+    // returns cached LER + Concentration on hit or computes and inserts on
+    // miss. Returns true iff hit.
+    static bool GridCacheLookup(PackContext& ctx, int gridW, int gridH, int& outLerArea, int& outLerWidth,
+                                int& outLerHeight, int& outLerX, int& outLerY, double& outConcentration,
+                                int& outStrandedCells);
 
     // Unified scoring function — used by annealing, Pack(), and result comparison.
     // Internally H-mode: checks lerHeight >= target. W-mode arrives here

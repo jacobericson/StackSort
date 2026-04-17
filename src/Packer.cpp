@@ -49,6 +49,18 @@ void Packer::InitPackContext(PackContext& ctx, int gridW, int gridH, int numItem
     ctx.seedPl.reserve(numItems);
     ctx.bestPl.reserve(numItems);
     ctx.skylineWasteCoef = DEFAULT_SKYLINE_WASTE_COEF;
+    ctx.gridCacheCount   = 0;
+    ctx.gridCacheHead    = 0;
+    ctx.skylineSnapBoundaries.reserve((size_t)numItems + 1);
+    ctx.skylineSnapWaste.reserve((size_t)numItems * 30);
+    ctx.skylineSnapSkyline.reserve((size_t)numItems * 20);
+    ctx.skylineSnapGridDelta.reserve((size_t)totalCells);
+    ctx.skylineSnapN     = 0;
+    ctx.skylineSnapValid = false;
+#ifdef STACKSORT_PROFILE
+    ctx.profSkylinePrefixK      = 0;
+    ctx.profSkylinePrefixCycles = 0;
+#endif
 }
 
 void Packer::BuildOccupancyGrid(PackContext& ctx, int gridW, int gridH)

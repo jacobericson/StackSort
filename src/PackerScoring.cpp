@@ -2,6 +2,11 @@
 
 #include <cstring>
 
+#ifdef STACKSORT_PROFILE
+#include <intrin.h>
+#pragma intrinsic(__rdtsc)
+#endif
+
 // Integer square root via Newton's method (no <cmath> dependency).
 static int isqrt(int n)
 {
@@ -81,11 +86,18 @@ void Packer::ComputeLERCtx(PackContext& ctx, const unsigned char* grid, int grid
 
     for (int y = 0; y < gridH; ++y)
     {
+        int maxHeight = 0;
         for (int x = 0; x < gridW; ++x)
         {
             if (grid[y * gridW + x] == 0) ctx.heights[x] = ctx.heights[x] + 1;
             else ctx.heights[x] = 0;
+            if (ctx.heights[x] > maxHeight) maxHeight = ctx.heights[x];
         }
+
+        // Any rectangle with its bottom at row y is bounded above by
+        // gridW * maxHeight. If that's already <= the best so far, the
+        // monotonic-stack sweep can't improve outArea; skip it.
+        if (gridW * maxHeight <= outArea) continue;
 
         ctx.lerStack.clear();
 
@@ -450,14 +462,12 @@ long long Packer::ComputeGroupingBonusAdj(const std::vector<Placement>& placemen
         }
     }
 
-    // Super-linear scaling per component: b^(quarters/4) via applyGroupingPower
     long long total = 0;
     for (int i = 0; i < n; ++i)
     {
         if (uf_find(parent, i) == i && compBorders[i] > 0)
             total += applyGroupingPower(compBorders[i], groupingPowerQuarters);
     }
-
     return total;
 }
 
@@ -500,15 +510,14 @@ long long Packer::ComputeGroupingBonus(const std::vector<Placement>& placements,
         }
     }
 
-    // Super-linear scaling per component: b^(quarters/4). Default quarters=6
-    // hits the legacy fast-path b * isqrt(b) so byte-match is preserved.
+    // quarters=6 (default) hits applyGroupingPower's fast path (b * isqrt(b))
+    // so the legacy b^1.5 formula is preserved bit-for-bit.
     long long total = 0;
     for (int i = 0; i < n; ++i)
     {
         if (uf_find(parent, i) == i && compBorders[i] > 0)
             total += applyGroupingPower(compBorders[i], groupingPowerQuarters);
     }
-
     return total;
 }
 

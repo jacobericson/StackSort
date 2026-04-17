@@ -24,6 +24,22 @@
 #define PROF_TICK(acc) ((void)0)
 #endif
 
+// One-shot rdtsc timers for per-run phases (pre-reservation scan, greedy
+// seed, unconstrained fallback, OptimizeGrouping, BordersRaw). Each phase
+// gets a uniquely-named snapshot variable so the BEGIN/END pairs can be
+// nested or sequenced without collision.
+#ifdef STACKSORT_PROFILE
+#define PROF_PHASE_BEGIN(tag) unsigned long long _profPhase_##tag = __rdtsc()
+#define PROF_PHASE_END(tag, acc)                                                                                       \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        acc += __rdtsc() - _profPhase_##tag;                                                                           \
+    } while (0)
+#else
+#define PROF_PHASE_BEGIN(tag) ((void)0)
+#define PROF_PHASE_END(tag, acc) ((void)0)
+#endif
+
 // Simple RNG (no <random> in VS2010).
 
 struct LCG
@@ -149,6 +165,39 @@ static void ShuffleGroups(std::vector<Packer::Item>& items, LCG& rng)
     items.swap(reordered);
 }
 
+// Empty sentinel for placementIdGrid is -1 (not 0) — writing 0 would alias
+// pidx=0 and corrupt CollectAdjacentPids.
+static void RestoreSkylineState(Packer::PackContext& ctx, int gridW, int gridH, int keptPrefix)
+{
+    const Packer::SkylineBoundary& b = ctx.skylineSnapBoundaries[(size_t)keptPrefix];
+
+    ctx.placements.resize((size_t)b.placementsCount);
+
+    ctx.wasteRects.reserve((size_t)b.wasteCount);
+    ctx.wasteRects.assign(ctx.skylineSnapWaste.begin() + b.wasteStart,
+                          ctx.skylineSnapWaste.begin() + b.wasteStart + b.wasteCount);
+    ctx.skyline.reserve((size_t)b.skylineCount);
+    ctx.skyline.assign(ctx.skylineSnapSkyline.begin() + b.skylineStart,
+                       ctx.skylineSnapSkyline.begin() + b.skylineStart + b.skylineCount);
+
+    for (int k = keptPrefix + 1; k <= ctx.skylineSnapN; ++k)
+    {
+        const Packer::SkylineBoundary& bj = ctx.skylineSnapBoundaries[(size_t)k];
+        for (int i = 0; i < bj.gridDeltaCount; ++i)
+        {
+            int cellIdx                          = ctx.skylineSnapGridDelta[(size_t)(bj.gridDeltaStart + i)];
+            ctx.placementIdGrid[(size_t)cellIdx] = -1;
+        }
+    }
+
+    // SkylinePack's emit-on-placement push_backs must land at boundary k+1;
+    // stale entries past boundary[keptPrefix] would otherwise offset them.
+    ctx.skylineSnapBoundaries.resize((size_t)(keptPrefix + 1));
+    ctx.skylineSnapWaste.resize((size_t)(b.wasteStart + b.wasteCount));
+    ctx.skylineSnapSkyline.resize((size_t)(b.skylineStart + b.skylineCount));
+    ctx.skylineSnapGridDelta.resize((size_t)(b.gridDeltaStart + b.gridDeltaCount));
+}
+
 Packer::Result Packer::PackAnnealed(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim, int target,
                                     volatile long* abortFlag, const std::vector<Item>* seedOrder,
                                     std::vector<Item>* outBestOrder, int skipLAHCIfAreaBelow,
@@ -251,6 +300,8 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     int diagRepairMoveScans           = 0;
     int diagRepairMoveHits            = 0;
     int diagRepairMoveAccepts         = 0;
+    int diagSkylineSnapHits           = 0;
+    int diagSkylineSnapProbes         = 0;
 
 #ifdef STACKSORT_PROFILE
     // Cycle accumulators for the LAHC inner loop. Unsigned so subtraction
@@ -264,6 +315,17 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     unsigned long long profStranded = 0;
     unsigned long long profScore    = 0;
     unsigned long long profAccept   = 0;
+    // Per-run phase accumulators (outside the LAHC inner loop).
+    unsigned long long profPreReservation        = 0;
+    unsigned long long profGreedySeed            = 0;
+    unsigned long long profUnconstrainedFallback = 0;
+    unsigned long long profOptimizeGrouping      = 0;
+    unsigned long long profBordersRaw            = 0;
+
+    long long diagKeptPrefixSum = 0;
+    int diagKeptPrefixCount     = 0;
+    int diagGridHashProbes      = 0;
+    int diagGridHashHits        = 0;
 #endif
 
     // Trivial cases — just do a single greedy pack
@@ -294,6 +356,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
 
     int bestReserveW = 0;
     int bestReserveX = 0;
+    PROF_PHASE_BEGIN(preRes);
     if (target > 1 && enablePreReservation)
     {
         for (int w = gridW; w >= MIN_RESERVE_W; --w)
@@ -310,6 +373,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
             }
         }
     }
+    PROF_PHASE_END(preRes, profPreReservation);
 
     // Aggressive H-skip: if upper-bound LER can't beat caller's threshold,
     // skip LAHC. Still run Pack() for coverage.
@@ -331,6 +395,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     }
 
     // Greedy seed: run BSSF. If enableBafSeed, also run BAF and keep whichever placed more.
+    PROF_PHASE_BEGIN(greedy);
     MaxRectsPack(ctx, gridW, gridH, order, target, abortFlag, bestReserveX, bestReserveW, 0); // BSSF
     ++diagPackCalls;
     if (abortFlag && *abortFlag != 0)
@@ -383,6 +448,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     }
 
     ctx.seedPl = ctx.placements;
+    PROF_PHASE_END(greedy, profGreedySeed);
 
     BuildOccupancyGrid(ctx, gridW, gridH);
     int seedLerA, seedLerW, seedLerH, seedLerX, seedLerY;
@@ -445,6 +511,11 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         else curOrder = order;
         if (restart > 0) ShuffleGroups(curOrder, rng);
 
+#ifdef STACKSORT_PROFILE
+        // 0 → skip prefix measurement for the restart-seed SkylinePack.
+        ctx.profSkylinePrefixK = 0;
+#endif
+
         // Pack the restart seed
         SkylinePack(ctx, gridW, gridH, curOrder, target, abortFlag, bestReserveX, bestReserveW);
         ++diagPackCalls;
@@ -452,10 +523,14 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         BuildOccupancyGrid(ctx, gridW, gridH);
 
         int curLerA, curLerW, curLerH, curLerX, curLerY;
-        ComputeLERCtx(ctx, &ctx.grid[0], gridW, gridH, curLerA, curLerW, curLerH, curLerX, curLerY);
         int curStranded = 0;
-        double curConc =
-            ComputeConcentrationAndStrandedCtx(ctx, gridW, gridH, curLerX, curLerY, curLerW, curLerH, curStranded);
+        double curConc  = 0.0;
+        bool curCacheHit =
+            GridCacheLookup(ctx, gridW, gridH, curLerA, curLerW, curLerH, curLerX, curLerY, curConc, curStranded);
+#ifdef STACKSORT_PROFILE
+        ++diagGridHashProbes;
+        if (curCacheHit) ++diagGridHashHits;
+#endif
         int curNumRot         = CountRotated(ctx.placements);
         long long curGrouping = ComputeGroupingBonus(ctx.placements, items, effGroupingPower);
         long long curScore    = ComputeScore(ctx.placements.size(), curLerA, curLerH, curConc, target, curNumRot,
@@ -486,6 +561,11 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
             history[i] = curScore;
 
         int itersSinceImproved = 0;
+
+        // Reset the grid cache per-restart. Cross-restart sharing is
+        // rare because each restart perturbs from a different ordering.
+        ctx.gridCacheCount = 0;
+        ctx.gridCacheHead  = 0;
 
         for (int iter = 0; iter < effIters; ++iter)
         {
@@ -714,26 +794,53 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                 }
             }
 
+            // Fraction of curOrder preserved by this move. REPAIR-hit sets
+            // move.b=0, so min(a,b)=0 handles it without a special case.
+            int keptPrefix = (move.type == MOVE_ROTATE) ? move.a : ((move.a < move.b) ? move.a : move.b);
+#ifdef STACKSORT_PROFILE
+            diagKeptPrefixSum += keptPrefix;
+            ++diagKeptPrefixCount;
+#endif
+
+            int startIdx = 0;
+            ++diagSkylineSnapProbes;
+            if (ctx.skylineSnapValid && ctx.skylineSnapN == (int)curOrder.size() && keptPrefix > 0 &&
+                keptPrefix < ctx.skylineSnapN)
+            {
+                RestoreSkylineState(ctx, gridW, gridH, keptPrefix);
+                startIdx = keptPrefix;
+                ++diagSkylineSnapHits;
+            }
+#ifdef STACKSORT_PROFILE
+            // Skip prefix measurement on restore — the timer in SkylinePack
+            // would fire immediately and record ~0 cycles otherwise.
+            ctx.profSkylinePrefixK = (startIdx > 0) ? 0 : keptPrefix;
+#endif
+
             PROF_TICK(profMoveGen);
 
             // Pack with perturbed order
-            SkylinePack(ctx, gridW, gridH, curOrder, target, abortFlag, bestReserveX, bestReserveW);
+            SkylinePack(ctx, gridW, gridH, curOrder, target, abortFlag, bestReserveX, bestReserveW, startIdx);
             ++diagPackCalls;
             if (abortFlag && *abortFlag != 0) break;
 
             PROF_TICK(profSkyline);
 
             BuildOccupancyGrid(ctx, gridW, gridH);
-            int candLerA, candLerW, candLerH, candLerX, candLerY;
-            ComputeLERCtx(ctx, &ctx.grid[0], gridW, gridH, candLerA, candLerW, candLerH, candLerX, candLerY);
-            PROF_TICK(profLer);
 
-            int candStranded = 0;
-            double candConc  = ComputeConcentrationAndStrandedCtx(ctx, gridW, gridH, candLerX, candLerY, candLerW,
-                                                                  candLerH, candStranded);
-            // Post-fusion: profConc captures the combined Conc+Stranded work.
-            // profStranded stays at 0 in profile builds (kept in schema for
-            // pre-fusion comparison).
+            int candLerA, candLerW, candLerH, candLerX, candLerY;
+            int candStranded  = 0;
+            double candConc   = 0.0;
+            bool candCacheHit = GridCacheLookup(ctx, gridW, gridH, candLerA, candLerW, candLerH, candLerX, candLerY,
+                                                candConc, candStranded);
+#ifdef STACKSORT_PROFILE
+            ++diagGridHashProbes;
+            if (candCacheHit) ++diagGridHashHits;
+#endif
+            // profConc's tick is preserved even though the cache attributes
+            // all its work to profLer — skipping it would fold those cycles
+            // into profGrouping instead.
+            PROF_TICK(profLer);
             PROF_TICK(profConc);
 
             int candNumRot         = CountRotated(ctx.placements);
@@ -782,6 +889,10 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                 ++itersSinceImproved;
 
                 UndoMove(curOrder, move);
+                // Snap reflects the packed (rejected) curOrder; undoing leaves
+                // curOrder diverging from the snap at the move's positions,
+                // so keptPrefix vs snap is no longer safe next iter.
+                ctx.skylineSnapValid = false;
             }
 
             history[hi] = curScore;
@@ -812,6 +923,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
 
     // Unconstrained fallback: items may naturally leave a good gap without
     // being forced into an L-shape. Keep whichever scores higher.
+    PROF_PHASE_BEGIN(unc);
     if (enableUnconstrainedFallback && bestReserveW > 0 && !(abortFlag && *abortFlag != 0))
     {
         Result unconResult = PackH(gridW, gridH, items, target, abortFlag, reuseCtx);
@@ -842,8 +954,12 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
             diagUnconstrainedFallbackWon = true;
         }
     }
+    PROF_PHASE_END(unc, profUnconstrainedFallback);
 
+    PROF_PHASE_BEGIN(optGrp);
     if (enableOptimizeGrouping) OptimizeGrouping(ctx.bestPl, items, effGroupingPower);
+    PROF_PHASE_END(optGrp, profOptimizeGrouping);
+
     bestGrouping = ComputeGroupingBonus(ctx.bestPl, items, effGroupingPower);
 
     // Rotated flags relative to original input dims
@@ -879,18 +995,32 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         outDiag->repairMoveScans          = diagRepairMoveScans;
         outDiag->repairMoveHits           = diagRepairMoveHits;
         outDiag->repairMoveAccepts        = diagRepairMoveAccepts;
+        outDiag->skylineSnapHits          = diagSkylineSnapHits;
+        outDiag->skylineSnapProbes        = diagSkylineSnapProbes;
         // Power-independent clustering metric for cross-power CSV/analysis.
         // Computed once per final result, not per LAHC iter.
+        PROF_PHASE_BEGIN(bordersRaw);
         outDiag->groupingBordersRaw = ComputeGroupingBordersRaw(ctx.bestPl, items);
+        PROF_PHASE_END(bordersRaw, profBordersRaw);
 #ifdef STACKSORT_PROFILE
-        outDiag->profCyclesMoveGen       = (long long)profMoveGen;
-        outDiag->profCyclesSkylinePack   = (long long)profSkyline;
-        outDiag->profCyclesLer           = (long long)profLer;
-        outDiag->profCyclesConcentration = (long long)profConc;
-        outDiag->profCyclesGrouping      = (long long)profGrouping;
-        outDiag->profCyclesStranded      = (long long)profStranded;
-        outDiag->profCyclesScore         = (long long)profScore;
-        outDiag->profCyclesAccept        = (long long)profAccept;
+        outDiag->profCyclesMoveGen               = (long long)profMoveGen;
+        outDiag->profCyclesSkylinePack           = (long long)profSkyline;
+        outDiag->profCyclesLer                   = (long long)profLer;
+        outDiag->profCyclesConcentration         = (long long)profConc;
+        outDiag->profCyclesGrouping              = (long long)profGrouping;
+        outDiag->profCyclesStranded              = (long long)profStranded;
+        outDiag->profCyclesScore                 = (long long)profScore;
+        outDiag->profCyclesAccept                = (long long)profAccept;
+        outDiag->profCyclesPreReservation        = (long long)profPreReservation;
+        outDiag->profCyclesGreedySeed            = (long long)profGreedySeed;
+        outDiag->profCyclesUnconstrainedFallback = (long long)profUnconstrainedFallback;
+        outDiag->profCyclesOptimizeGrouping      = (long long)profOptimizeGrouping;
+        outDiag->profCyclesBordersRaw            = (long long)profBordersRaw;
+        outDiag->keptPrefixSum                   = diagKeptPrefixSum;
+        outDiag->keptPrefixCount                 = diagKeptPrefixCount;
+        outDiag->gridHashProbes                  = diagGridHashProbes;
+        outDiag->gridHashHits                    = diagGridHashHits;
+        outDiag->profCyclesSkylinePrefix         = ctx.profSkylinePrefixCycles;
 #endif
     }
     return result;
