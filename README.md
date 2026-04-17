@@ -109,14 +109,14 @@ Search parameters were tuned over 10 rounds using a standalone benchmark harness
 | Repair move | enabled | disabled | Live feature: ~1.4k attempts/run, 33% LAHC acceptance rate |
 | Pre-reservation | enabled | disabled | Mandatory for target>1; disabling drops quality to 0% on dense inventories |
 
-#### Refinement (20 restarts x 8000 iters, conditional)
+#### Refinement (24 restarts x 8000 iters, conditional)
 
 Refinement runs a second LAHC pass warm-started from the first-pass best ordering. It triggers conditionally to avoid wasting budget on inventories that are already well-packed.
 
 | Parameter | Value | Alternatives tested | Result |
 |---|---|---|---|
 | LAHC history | 200 | 100, 400, 800, 1000 | Monotonic: shorter = better. 200 won on basin rate (+2.4pp over 1000), replace rate, score lift, and grouping lift |
-| Restarts | 20 | 8, 24, 32, 64 | Monotonic but diminishing: 24 gets +6.4pp basin rate over 8; 64 adds only +1.8pp more past 32. 20 balances quality vs wall time |
+| Restarts | 24 | 8, 20, 32, 64 | Monotonic but diminishing: 24 gets +6.4pp basin rate over 8; 64 adds only +1.8pp more past 32. 24 wins +1.5pp over 20 on bimodals for +20% refine wall, still amortized on the worker thread |
 | Plateau threshold | 2000 | 1000, 1500 | Higher plateau gives refinement more budget per restart to escape local optima on warm-started seeds |
 
 #### Refinement trigger heuristic

@@ -2,7 +2,7 @@
 
 #include "Packer.h"
 
-static const int REFINE_RESTARTS  = 20;
+static const int REFINE_RESTARTS  = 24;
 static const int REFINE_ITERS     = 8000;
 static const int REFINE_LAHC_HIST = 200;
 static const int REFINE_PLATEAU   = 2000;
