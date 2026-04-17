@@ -15,10 +15,14 @@
 # --- tests/: ---
 /tests/*
 !/tests/analyze.py
+!/tests/analyze_perf_delta.py
 !/tests/basins.py
 !/tests/bistability.py
+!/tests/bitmatch.py
 !/tests/generate_corpus.py
 !/tests/loaders.py
+!/tests/profile_analysis.py
+!/tests/refine_triggers.py
 !/tests/run_matrix.py
 !/tests/configs/
 !/tests/corpus/
