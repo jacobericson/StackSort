@@ -1,0 +1,10 @@
+# 8x8_starter_bandit_haul
+# cells=57 density=0.891 weight=16.05
+grid 8 8
+# w h type_id rotatable name
+4 6 99 0 Rag Shirt
+4 4 120 0 Halfpants (ragged)
+7 1 232 0 Iron Club
+2 1 11 0 Basic First Aid Kit
+2 2 110 0 Ration Pack
+4 1 146 0 Bolts [Regulars]

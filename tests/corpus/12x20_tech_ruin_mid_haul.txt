@@ -1,0 +1,24 @@
+# 12x20_tech_ruin_mid_haul
+# cells=162 density=0.675 weight=60.50
+grid 12 20
+# w h type_id rotatable name
+4 2 182 0 Robotics Components
+4 3 28 0 Copper Alloy Plates
+3 2 21 0 Electrical Components
+3 2 12 0 Skeleton Repair Kit
+4 3 112 0 Iron Plates
+6 1 35 0 Steel Bars
+3 3 134 0 Gears
+3 2 34 0 Foodcube
+3 2 14 0 Advanced First Aid Kit
+4 4 38 0 AI Core
+3 3 178 0 CPU Unit
+6 2 171 0 Power Core
+3 2 183 0 Generator Core
+2 2 177 0 Ancient Science Book
+5 1 169 0 Skeleton Muscle
+3 2 167 0 Skeleton Eye
+3 2 170 0 Capacitor
+4 3 180 0 Motor
+3 2 114 0 Raw Iron
+3 3 135 0 Chainmail Sheets

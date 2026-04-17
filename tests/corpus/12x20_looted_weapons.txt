@@ -1,0 +1,22 @@
+# 12x20_looted_weapons
+# cells=209 density=0.871 weight=128.06
+grid 12 20
+# w h type_id rotatable name
+10 1 15 0 Nodachi
+10 1 15 0 Nodachi
+10 2 204 0 Falling Sun
+9 2 205 0 Long Cleaver
+8 2 175 0 Horse Chopper
+7 1 132 0 Katana
+7 1 132 0 Katana
+8 2 1 0 Foreign Sabre
+3 3 157 0 Advanced Splint Kit
+2 2 110 0 Ration Pack
+2 3 129 0 Water Jug
+9 1 160 0 Topper
+10 2 192 0 Plank
+10 2 236 0 Paladin's Cross
+7 1 215 0 Jitte
+10 2 140 0 Eagle's Cross
+3 2 147 0 Bolts [Heavies]
+4 1 146 0 Bolts [Regulars]

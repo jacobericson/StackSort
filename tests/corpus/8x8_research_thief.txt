@@ -1,0 +1,18 @@
+# 8x8_research_thief
+# cells=59 density=0.922 weight=4.60
+grid 8 8
+# w h type_id rotatable name
+4 4 38 0 AI Core
+2 2 39 0 Engineering Research
+2 2 39 0 Engineering Research
+2 2 39 0 Engineering Research
+1 1 91 0 Blueprints
+1 1 90 0 Blueprints (armour)
+1 1 93 0 Blueprints (gear)
+2 2 40 0 Book
+2 2 177 0 Ancient Science Book
+2 2 86 0 Map of the Ashlands
+2 2 72 0 Ancient Military Documents
+2 2 84 0 Old Treasure Map
+2 2 67 0 Map of the Border Zone
+2 2 110 0 Ration Pack

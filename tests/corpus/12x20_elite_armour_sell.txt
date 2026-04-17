@@ -1,0 +1,17 @@
+# 12x20_elite_armour_sell
+# cells=209 density=0.871 weight=115.58
+grid 12 20
+# w h type_id rotatable name
+4 6 193 0 Samurai Armour
+4 6 193 0 Samurai Armour
+4 4 198 0 Plated Drifter's Leather Pants
+4 4 198 0 Plated Drifter's Leather Pants
+4 4 186 0 Heart Protector
+4 4 186 0 Heart Protector
+3 3 62 0 Masked Helmet
+4 2 48 0 Plated Longboots
+4 6 45 0 Mercenary Plate
+4 6 6 0 Black Plate Jacket
+3 2 34 0 Foodcube
+3 2 14 0 Advanced First Aid Kit
+4 5 7 0 Samurai Legplates

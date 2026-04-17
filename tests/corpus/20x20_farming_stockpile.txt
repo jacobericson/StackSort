@@ -1,0 +1,39 @@
+# 20x20_farming_stockpile
+# cells=358 density=0.895 weight=68.50
+grid 20 20
+# w h type_id rotatable name
+5 5 26 0 Wheatstraw
+5 5 26 0 Wheatstraw
+5 5 26 0 Wheatstraw
+5 5 26 0 Wheatstraw
+5 5 26 0 Wheatstraw
+3 1 130 0 Cactus
+3 1 130 0 Cactus
+3 1 130 0 Cactus
+3 1 130 0 Cactus
+3 3 122 0 Greenfruit
+3 3 122 0 Greenfruit
+3 3 122 0 Greenfruit
+3 3 122 0 Greenfruit
+3 3 122 0 Greenfruit
+5 5 41 0 Water
+5 5 41 0 Water
+5 5 41 0 Water
+5 5 41 0 Water
+2 2 184 0 Foul Raw Meat
+2 2 184 0 Foul Raw Meat
+2 2 184 0 Foul Raw Meat
+2 2 184 0 Foul Raw Meat
+2 2 184 0 Foul Raw Meat
+2 2 203 0 Dried Meat
+2 2 203 0 Dried Meat
+2 2 203 0 Dried Meat
+2 2 203 0 Dried Meat
+2 2 203 0 Dried Meat
+2 2 203 0 Dried Meat
+2 2 203 0 Dried Meat
+2 2 203 0 Dried Meat
+3 2 34 0 Foodcube
+3 2 34 0 Foodcube
+3 2 34 0 Foodcube
+3 2 34 0 Foodcube

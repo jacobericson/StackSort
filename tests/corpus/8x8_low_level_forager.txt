@@ -1,0 +1,13 @@
+# 8x8_low_level_forager
+# cells=60 density=0.938 weight=19.00
+grid 8 8
+# w h type_id rotatable name
+3 3 36 0 Cotton
+2 3 121 0 Leather
+3 2 114 0 Raw Iron
+3 2 37 0 Fabrics
+3 3 134 0 Gears
+4 3 112 0 Iron Plates
+3 2 21 0 Electrical Components
+2 1 11 0 Basic First Aid Kit
+2 2 110 0 Ration Pack
