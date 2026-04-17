@@ -1,37 +1,38 @@
-# VS 2010 user/IDE files
-*.suo
-*.sdf
-*.vcxproj.user
-.vs/
+# Whitelist: ignore everything, then allow known paths.
+# To commit a new top-level path, add an explicit `!/path` line.
 
-# Build output
-build/
-x64/
+# --- Root ---
+/*
+!/.gitattributes
+!/.gitignore
+!/LICENSE
+!/README.md
+!/StackSort.vcxproj
+!/src/
+!/stacksort.gif
+!/tests/
 
-# Compiled DLL (build artifact, not source)
-*.dll
+# --- tests/: ---
+/tests/*
+!/tests/analyze.py
+!/tests/basins.py
+!/tests/bistability.py
+!/tests/generate_corpus.py
+!/tests/loaders.py
+!/tests/run_matrix.py
+!/tests/configs/
+!/tests/corpus/
+!/tests/harness/
 
-# Root build script and mod descriptor (local/generated)
-/build.bat
-*.mod
+# --- tests/configs/: ---
+/tests/configs/*
+!/tests/configs/baseline.ini
 
-# Runtime logs
-*.log
+# --- tests/corpus/: ---
+/tests/corpus/*
+!/tests/corpus/*.txt
 
-# Crash dumps and bug reports
-Bugs/
-
-# Tuning harness build + run artifacts
-tests/harness/bin/
-tests/harness/build.bat
-tests/harness/obj/
-tests/harness/obj_profile/
-tests/harness/obj_validate/
-tests/results/
-
-# Test configs (only baseline committed)
-tests/configs/*
-!tests/configs/baseline.ini
-
-# Python bytecode
-tests/__pycache__/
+# --- tests/harness/: only C++ source ---
+/tests/harness/*
+!/tests/harness/*.cpp
+!/tests/harness/*.h
