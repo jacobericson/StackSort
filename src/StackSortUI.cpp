@@ -209,10 +209,12 @@ void StackSortUI::InitializeUI(InventoryGUI* gui, MyGUI::Widget* arrangeBtn, Inv
     bool isBodyGUI          = (gui == ownerGUI && gui->childInventory != NULL);
     const int BODY_X_OFFSET = -40;
 
+#ifdef STACKSORT_PACKER_GRID_LOG
     LogDebug(std::string("[StackSort] Layout anchor: arrangeBtn (") + IntToStr(ac.left) + "," + IntToStr(ac.top) + " " +
              IntToStr(ac.width) + "x" + IntToStr(ac.height) + ")" + ", parent (" + IntToStr(pc.left) + "," +
              IntToStr(pc.top) + " " + IntToStr(pc.width) + "x" + IntToStr(pc.height) + ")" +
              (isBodyGUI ? " [body]" : ""));
+#endif
 
     // Hide the vanilla ArrangeButton — the new 4-button group replaces it.
     // MyGUI recreates the widget on inventory reopen, so no restore needed.

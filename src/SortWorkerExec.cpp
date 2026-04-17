@@ -191,10 +191,12 @@ void SortWorker::ExecuteJob(Job* job, int workerIdx)
             msg << result.concentration << ", str " << result.strandedCells << ", grp " << result.groupingBonus
                 << (result.allPlaced ? "" : " PARTIAL");
             LogDebug(msg.str());
+#ifdef STACKSORT_PACKER_GRID_LOG
             {
                 int reserveLine = (dim == Packer::TARGET_H) ? (gridH - t) : gridH;
                 LogDebug("\n" + BuildGridString(gridW, gridH, reserveLine, result, packItemsLocal));
             }
+#endif
 
             {
                 ScopedLock rl(cs->resultLock);
@@ -376,10 +378,12 @@ void SortWorker::ExecuteJob(Job* job, int workerIdx)
             rmsg.precision(1);
             rmsg << std::fixed << " (" << ms << "ms)";
             LogDebug(rmsg.str());
+#ifdef STACKSORT_PACKER_GRID_LOG
             {
                 int reserveLine = (dim == Packer::TARGET_H) ? (gridH - target) : gridH;
                 LogDebug("\n" + BuildGridString(gridW, gridH, reserveLine, refined, packItemsLocal));
             }
+#endif
         }
         else
         {
