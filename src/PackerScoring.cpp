@@ -1,5 +1,6 @@
 #include "Packer.h"
 
+#include <algorithm>
 #include <cstring>
 
 #ifdef STACKSORT_PROFILE
@@ -50,6 +51,8 @@ static long long applyGroupingPower(int b, int quarters)
         return (long long)b * isqrt(b); // b^1.5 — DEFAULT, must match legacy bit-for-bit
     case 8:
         return (long long)b * b; // b^2
+    default:
+        break;
     }
 
     long long bq = 1;
@@ -91,7 +94,7 @@ void Packer::ComputeLERCtx(PackContext& ctx, const unsigned char* grid, int grid
         {
             if (grid[y * gridW + x] == 0) ctx.heights[x] = ctx.heights[x] + 1;
             else ctx.heights[x] = 0;
-            if (ctx.heights[x] > maxHeight) maxHeight = ctx.heights[x];
+            maxHeight = std::max(maxHeight, ctx.heights[x]);
         }
 
         // Any rectangle with its bottom at row y is bounded above by
@@ -680,7 +683,7 @@ void Packer::OptimizeGrouping(std::vector<Placement>& placements, const std::vec
 
 bool Packer::ValidatePlacements(int gridW, int gridH, const std::vector<Placement>& placements)
 {
-    std::vector<unsigned char> grid(gridW * gridH, 0);
+    std::vector<unsigned char> grid((size_t)gridW * (size_t)gridH, 0);
 
     for (size_t i = 0; i < placements.size(); ++i)
     {

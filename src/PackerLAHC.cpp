@@ -167,7 +167,7 @@ static void ShuffleGroups(std::vector<Packer::Item>& items, LCG& rng)
 
 // Empty sentinel for placementIdGrid is -1 (not 0) — writing 0 would alias
 // pidx=0 and corrupt CollectAdjacentPids.
-static void RestoreSkylineState(Packer::PackContext& ctx, int gridW, int gridH, int keptPrefix)
+static void RestoreSkylineState(Packer::PackContext& ctx, int /*gridW*/, int /*gridH*/, int keptPrefix)
 {
     const Packer::SkylineBoundary& b = ctx.skylineSnapBoundaries[(size_t)keptPrefix];
 
@@ -185,21 +185,21 @@ static void RestoreSkylineState(Packer::PackContext& ctx, int gridW, int gridH, 
         const Packer::SkylineBoundary& bj = ctx.skylineSnapBoundaries[(size_t)k];
         for (int i = 0; i < bj.gridDeltaCount; ++i)
         {
-            int cellIdx                          = ctx.skylineSnapGridDelta[(size_t)(bj.gridDeltaStart + i)];
+            int cellIdx                          = ctx.skylineSnapGridDelta[(size_t)bj.gridDeltaStart + (size_t)i];
             ctx.placementIdGrid[(size_t)cellIdx] = -1;
         }
     }
 
     // SkylinePack's emit-on-placement push_backs must land at boundary k+1;
     // stale entries past boundary[keptPrefix] would otherwise offset them.
-    ctx.skylineSnapBoundaries.resize((size_t)(keptPrefix + 1));
-    ctx.skylineSnapWaste.resize((size_t)(b.wasteStart + b.wasteCount));
-    ctx.skylineSnapSkyline.resize((size_t)(b.skylineStart + b.skylineCount));
-    ctx.skylineSnapGridDelta.resize((size_t)(b.gridDeltaStart + b.gridDeltaCount));
+    ctx.skylineSnapBoundaries.resize((size_t)keptPrefix + 1);
+    ctx.skylineSnapWaste.resize((size_t)b.wasteStart + (size_t)b.wasteCount);
+    ctx.skylineSnapSkyline.resize((size_t)b.skylineStart + (size_t)b.skylineCount);
+    ctx.skylineSnapGridDelta.resize((size_t)b.gridDeltaStart + (size_t)b.gridDeltaCount);
 }
 
 Packer::Result Packer::PackAnnealed(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim, int target,
-                                    volatile long* abortFlag, const std::vector<Item>* seedOrder,
+                                    const volatile long* abortFlag, const std::vector<Item>* seedOrder,
                                     std::vector<Item>* outBestOrder, int skipLAHCIfAreaBelow,
                                     const SearchParams* params, PackDiagnostics* outDiag, PackContext* reuseCtx)
 {
@@ -222,6 +222,7 @@ Packer::Result Packer::PackAnnealed(int gridW, int gridH, const std::vector<Item
         seedTPtr = &seedT;
     }
 
+    // NOLINTNEXTLINE(readability-suspicious-call-argument) — W-mode transpose: itemsT has w/h swapped and placements are swapped back after the call.
     Result r = PackAnnealedH(gridH, gridW, itemsT, target, abortFlag, seedTPtr, outBestOrder, skipLAHCIfAreaBelow,
                              params, outDiag, reuseCtx);
 
@@ -243,7 +244,7 @@ Packer::Result Packer::PackAnnealed(int gridW, int gridH, const std::vector<Item
 }
 
 Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int target,
-                                     volatile long* abortFlag, const std::vector<Item>* seedOrder,
+                                     const volatile long* abortFlag, const std::vector<Item>* seedOrder,
                                      std::vector<Item>* outBestOrder, int skipLAHCIfAreaBelow,
                                      const SearchParams* params, PackDiagnostics* outDiag, PackContext* reuseCtx)
 {
@@ -465,17 +466,15 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     diagGreedySeedLerArea = seedLerA;
 
     // Best solution tracking
-    ctx.bestPl             = ctx.seedPl;
-    long long bestScore    = seedScore;
-    int bestLerA           = seedLerA;
-    int bestLerW           = seedLerW;
-    int bestLerH           = seedLerH;
-    int bestLerX           = seedLerX;
-    int bestLerY           = seedLerY;
-    double bestConc        = seedConc;
-    int bestNumRot         = seedNumRot;
-    long long bestGrouping = seedGrouping;
-    int bestStranded       = seedStranded;
+    ctx.bestPl          = ctx.seedPl;
+    long long bestScore = seedScore;
+    int bestLerA        = seedLerA;
+    int bestLerW        = seedLerW;
+    int bestLerH        = seedLerH;
+    int bestLerX        = seedLerX;
+    int bestLerY        = seedLerY;
+    double bestConc     = seedConc;
+    int bestStranded    = seedStranded;
 
     if (outBestOrder) *outBestOrder = order;
 
@@ -525,11 +524,13 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         int curLerA, curLerW, curLerH, curLerX, curLerY;
         int curStranded = 0;
         double curConc  = 0.0;
+#ifdef STACKSORT_PROFILE
         bool curCacheHit =
             GridCacheLookup(ctx, gridW, gridH, curLerA, curLerW, curLerH, curLerX, curLerY, curConc, curStranded);
-#ifdef STACKSORT_PROFILE
         ++diagGridHashProbes;
         if (curCacheHit) ++diagGridHashHits;
+#else
+        GridCacheLookup(ctx, gridW, gridH, curLerA, curLerW, curLerH, curLerX, curLerY, curConc, curStranded);
 #endif
         int curNumRot         = CountRotated(ctx.placements);
         long long curGrouping = ComputeGroupingBonus(ctx.placements, items, effGroupingPower);
@@ -546,8 +547,6 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
             bestLerX        = curLerX;
             bestLerY        = curLerY;
             bestConc        = curConc;
-            bestNumRot      = curNumRot;
-            bestGrouping    = curGrouping;
             bestStranded    = curStranded;
             repairGridDirty = true;
             if (outBestOrder) *outBestOrder = curOrder;
@@ -710,10 +709,10 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                             ++gapCells;
                             int cx = ci % gridW;
                             int cy = ci / gridW;
-                            if (cx < minGX) minGX = cx;
-                            if (cx > maxGX) maxGX = cx;
-                            if (cy < minGY) minGY = cy;
-                            if (cy > maxGY) maxGY = cy;
+                            minGX  = std::min(minGX, cx);
+                            maxGX  = std::max(maxGX, cx);
+                            minGY  = std::min(minGY, cy);
+                            maxGY  = std::max(maxGY, cy);
 
                             if (cx > 0 && !ctx.visited[ci - 1] && !ctx.grid[ci - 1])
                             {
@@ -796,7 +795,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
 
             // Fraction of curOrder preserved by this move. REPAIR-hit sets
             // move.b=0, so min(a,b)=0 handles it without a special case.
-            int keptPrefix = (move.type == MOVE_ROTATE) ? move.a : ((move.a < move.b) ? move.a : move.b);
+            int keptPrefix = (move.type == MOVE_ROTATE) ? move.a : std::min(move.a, move.b);
 #ifdef STACKSORT_PROFILE
             diagKeptPrefixSum += keptPrefix;
             ++diagKeptPrefixCount;
@@ -829,13 +828,16 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
             BuildOccupancyGrid(ctx, gridW, gridH);
 
             int candLerA, candLerW, candLerH, candLerX, candLerY;
-            int candStranded  = 0;
-            double candConc   = 0.0;
+            int candStranded = 0;
+            double candConc  = 0.0;
+#ifdef STACKSORT_PROFILE
             bool candCacheHit = GridCacheLookup(ctx, gridW, gridH, candLerA, candLerW, candLerH, candLerX, candLerY,
                                                 candConc, candStranded);
-#ifdef STACKSORT_PROFILE
             ++diagGridHashProbes;
             if (candCacheHit) ++diagGridHashHits;
+#else
+            GridCacheLookup(ctx, gridW, gridH, candLerA, candLerW, candLerH, candLerX, candLerY, candConc,
+                            candStranded);
 #endif
             // profConc's tick is preserved even though the cache attributes
             // all its work to profLer — skipping it would fold those cycles
@@ -869,8 +871,6 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                     bestLerX           = candLerX;
                     bestLerY           = candLerY;
                     bestConc           = candConc;
-                    bestNumRot         = candNumRot;
-                    bestGrouping       = candGrouping;
                     bestStranded       = candStranded;
                     repairGridDirty    = true;
                     itersSinceImproved = 0;
@@ -942,14 +942,12 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         if (unconResult.allPlaced && unconResult.score > bestScore)
         {
             ctx.bestPl                   = unconResult.placements;
-            bestScore                    = unconResult.score;
             bestLerA                     = unconResult.lerArea;
             bestLerW                     = unconResult.lerWidth;
             bestLerH                     = unconResult.lerHeight;
             bestLerX                     = unconResult.lerX;
             bestLerY                     = unconResult.lerY;
             bestConc                     = unconResult.concentration;
-            bestNumRot                   = CountRotated(unconResult.placements);
             bestStranded                 = unconResult.strandedCells;
             diagUnconstrainedFallbackWon = true;
         }
@@ -960,12 +958,12 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     if (enableOptimizeGrouping) OptimizeGrouping(ctx.bestPl, items, effGroupingPower);
     PROF_PHASE_END(optGrp, profOptimizeGrouping);
 
-    bestGrouping = ComputeGroupingBonus(ctx.bestPl, items, effGroupingPower);
+    long long bestGrouping = ComputeGroupingBonus(ctx.bestPl, items, effGroupingPower);
 
     // Rotated flags relative to original input dims
     for (size_t i = 0; i < ctx.bestPl.size(); ++i)
         ctx.bestPl[i].rotated = (ctx.bestPl[i].w != items[ctx.bestPl[i].id].w);
-    bestNumRot = CountRotated(ctx.bestPl);
+    int bestNumRot = CountRotated(ctx.bestPl);
 
     Result result;
     result.placements    = ctx.bestPl;

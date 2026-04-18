@@ -2,40 +2,60 @@
 
 #include "Csv.h"
 
-CsvWriter::CsvWriter() : fp(NULL) {}
+CsvWriter::CsvWriter() : fp(NULL), writeError_(false) {}
 
 CsvWriter::~CsvWriter()
 {
-    Close();
+    (void)Close();
 }
 
 bool CsvWriter::Open(const std::string& path)
 {
-    Close();
-    fp = fopen(path.c_str(), "w");
+    (void)Close();
+    writeError_ = false;
+    fp          = fopen(path.c_str(), "w");
     return fp != NULL;
 }
 
-void CsvWriter::Close()
+bool CsvWriter::Close()
 {
-    if (fp)
-    {
-        fclose(fp);
-        fp = NULL;
-    }
+    if (!fp) return !writeError_;
+    int rc = fclose(fp);
+    fp     = NULL;
+    if (rc != 0) writeError_ = true;
+    return !writeError_;
 }
 
 void CsvWriter::WriteRow(const std::vector<std::string>& values)
 {
-    if (!fp) return;
+    if (!fp || writeError_) return;
     for (size_t i = 0; i < values.size(); ++i)
     {
-        if (i > 0) fputc(',', fp);
+        if (i > 0)
+        {
+            if (fputc(',', fp) == EOF)
+            {
+                writeError_ = true;
+                return;
+            }
+        }
         std::string escaped = CsvEscape(values[i]);
-        fputs(escaped.c_str(), fp);
+        if (fputs(escaped.c_str(), fp) == EOF)
+        {
+            writeError_ = true;
+            return;
+        }
     }
-    fputc('\n', fp);
-    fflush(fp);
+    if (fputc('\n', fp) == EOF)
+    {
+        writeError_ = true;
+        return;
+    }
+    if (fflush(fp) != 0)
+    {
+        writeError_ = true;
+        return;
+    }
 }
 
 std::string CsvEscape(const std::string& v)

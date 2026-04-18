@@ -1,0 +1,9 @@
+# Point clangd at the harness compilation database so cross-file
+# indexing works for both tests/harness/*.cpp and src/Packer*.cpp.
+# Regenerate compile_commands.json via tests/harness/gen_compile_commands.py
+# after adding/removing source files.
+CompileFlags:
+  CompilationDatabase: tests/harness
+
+Index:
+  Background: Build

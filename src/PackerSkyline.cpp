@@ -1,5 +1,6 @@
 #include "Packer.h"
 
+#include <algorithm>
 #include <climits>
 #include <cstring>
 
@@ -36,7 +37,7 @@ static void EmitBoundary(Packer::PackContext& ctx, int gridW, int placeX, int pl
     ctx.skylineSnapBoundaries.push_back(b);
 }
 
-void Packer::CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>& items, int curType, int start,
+void Packer::CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>& /*items*/, int curType, int start,
                                  int step, int count, int* adjPids, int& numAdj, int maxAdj)
 {
     for (int i = 0; i < count; ++i)
@@ -60,7 +61,7 @@ void Packer::CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>
 // reserveW == 0: two-pass soft reserve (prefer above reserveY, fallback anywhere).
 
 void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vector<Item>& items, int target,
-                         volatile long* abortFlag, int reserveX, int reserveW, int startIdx)
+                         const volatile long* abortFlag, int reserveX, int reserveW, int startIdx)
 {
     int reserveY   = gridH - target;
     int totalCells = gridW * gridH;
@@ -166,7 +167,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
             // Guillotine split: right remainder (full height), bottom (item width)
             int remRightW  = wr.w - wasteW;
             int remBottomH = wr.h - wasteH;
-            int wrx = wr.x, wry = wr.y, wrw = wr.w, wrh = wr.h;
+            int wrx = wr.x, wry = wr.y, wrh = wr.h;
             ctx.wasteRects.erase(ctx.wasteRects.begin() + bestWasteIdx);
             if (remRightW > 0)
             {
@@ -199,7 +200,6 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         int bestY              = INT_MAX;
         long long bestCombined = LLONG_MAX;
         int bestX              = -1;
-        int bestSi             = -1;
         int bestW = 0, bestH = 0;
         bool bestRotated = false;
         int curType      = items[idx].itemTypeId;
@@ -236,7 +236,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                     for (size_t sj = si; sj < ctx.skyline.size() && widthCovered < iw; ++sj)
                     {
                         int segY = ctx.skyline[sj].y;
-                        if (segY > maxY) maxY = segY;
+                        maxY     = std::max(maxY, segY);
 
                         int segLeft      = ctx.skyline[sj].x;
                         int segRight     = segLeft + ctx.skyline[sj].width;
@@ -327,7 +327,6 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                         bestY        = maxY;
                         bestCombined = combined;
                         bestX        = x;
-                        bestSi       = (int)si;
                         bestW        = iw;
                         bestH        = ih;
                         bestRotated  = (ori != 0);

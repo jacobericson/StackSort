@@ -61,7 +61,7 @@ class Packer
     struct PackContext; // forward decl; full definition below
 
     static Result Pack(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim, int target,
-                       volatile long* abortFlag = NULL, PackContext* reuseCtx = NULL);
+                       const volatile long* abortFlag = NULL, PackContext* reuseCtx = NULL);
 
     // Compute the Largest Empty Rectangle on an occupancy grid.
     // grid is W*H unsigned chars, 0 = empty, nonzero = occupied.
@@ -233,7 +233,7 @@ class Packer
     // outDiag: if non-NULL, receives diagnostic counters for the harness/tuner.
     // W-mode transposes internally.
     static Result PackAnnealed(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim, int target,
-                               volatile long* abortFlag = NULL, const std::vector<Item>* seedOrder = NULL,
+                               const volatile long* abortFlag = NULL, const std::vector<Item>* seedOrder = NULL,
                                std::vector<Item>* outBestOrder = NULL, int skipLAHCIfAreaBelow = 0,
                                const SearchParams* params = NULL, PackDiagnostics* outDiag = NULL,
                                PackContext* reuseCtx = NULL);
@@ -354,10 +354,10 @@ class Packer
     // H-mode implementations of Pack/PackAnnealed. The public Pack/PackAnnealed
     // dispatch here directly for TARGET_H and via a transpose wrapper for TARGET_W.
     static Result PackH(int gridW, int gridH, const std::vector<Item>& items, int target,
-                        volatile long* abortFlag = NULL, PackContext* reuseCtx = NULL);
+                        const volatile long* abortFlag = NULL, PackContext* reuseCtx = NULL);
 
     static Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int target,
-                                volatile long* abortFlag = NULL, const std::vector<Item>* seedOrder = NULL,
+                                const volatile long* abortFlag = NULL, const std::vector<Item>* seedOrder = NULL,
                                 std::vector<Item>* outBestOrder = NULL, int skipLAHCIfAreaBelow = 0,
                                 const SearchParams* params = NULL, PackDiagnostics* outDiag = NULL,
                                 PackContext* reuseCtx = NULL);
@@ -374,7 +374,8 @@ class Packer
     // heuristic: 0 = BSSF (Best Short Side Fit), 1 = BAF (Best Area Fit).
     // Writes results into ctx.placements.
     static void MaxRectsPack(PackContext& ctx, int gridW, int gridH, const std::vector<Item>& items, int target,
-                             volatile long* abortFlag = NULL, int reserveX = 0, int reserveW = 0, int heuristic = 0);
+                             const volatile long* abortFlag = NULL, int reserveX = 0, int reserveW = 0,
+                             int heuristic = 0);
 
     // Split all free rects overlapping the placed rect, generating sub-rects.
     static void SplitFreeRects(PackContext& ctx, const Rect& placed);
@@ -390,7 +391,8 @@ class Packer
     // startIdx > 0 requires caller to have restored ctx state from a prior
     // run's snapshot at boundary[startIdx].
     static void SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vector<Item>& items, int target,
-                            volatile long* abortFlag = NULL, int reserveX = 0, int reserveW = 0, int startIdx = 0);
+                            const volatile long* abortFlag = NULL, int reserveX = 0, int reserveW = 0,
+                            int startIdx = 0);
 
     // Build occupancy grid into ctx.grid (0=empty, 1=occupied).
     static void BuildOccupancyGrid(PackContext& ctx, int gridW, int gridH);

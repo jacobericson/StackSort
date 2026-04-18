@@ -186,7 +186,7 @@ void Packer::FindBestBAF(const std::vector<Rect>& freeRects, const Item& item, i
 }
 
 void Packer::MaxRectsPack(PackContext& ctx, int gridW, int gridH, const std::vector<Item>& items, int target,
-                          volatile long* abortFlag, int reserveX, int reserveW, int heuristic)
+                          const volatile long* abortFlag, int reserveX, int reserveW, int heuristic)
 {
     ctx.placements.clear();
     ctx.freeRects.clear();

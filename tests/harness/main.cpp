@@ -4,13 +4,18 @@
 // the four Packer*.cpp files plus this harness.
 
 #define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <Windows.h>
 
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
+#include <algorithm>
+#include <exception>
 #include <set>
 #include <sstream>
 #include <string>
@@ -46,15 +51,29 @@ struct Args
 
 static void PrintUsage()
 {
-    fprintf(stderr, "Usage: stacksort_bench --corpus DIR --config FILE --out FILE [options]\n"
-                    "  --corpus DIR       Directory containing instance .txt files\n"
-                    "  --config FILE      Path to INI config file (inherits from sibling baseline.ini)\n"
-                    "  --out FILE         Output CSV path\n"
-                    "  --seeds N          Number of seeds per instance (default 1)\n"
-                    "  --base-seed N      Base RNG seed (default 1, per-seed = base + idx)\n"
-                    "  --rotate {0|1}     Force canRotate on all items (default 0)\n"
-                    "  --refine {0|1}     Run production two-pass first+refinement (default 1)\n"
-                    "  --targets MIN:MAX  Target range (default 1:gridH-1)\n");
+    (void)fprintf(stderr, "Usage: stacksort_bench --corpus DIR --config FILE --out FILE [options]\n"
+                          "  --corpus DIR       Directory containing instance .txt files\n"
+                          "  --config FILE      Path to INI config file (inherits from sibling baseline.ini)\n"
+                          "  --out FILE         Output CSV path\n"
+                          "  --seeds N          Number of seeds per instance (default 1)\n"
+                          "  --base-seed N      Base RNG seed (default 1, per-seed = base + idx)\n"
+                          "  --rotate {0|1}     Force canRotate on all items (default 0)\n"
+                          "  --refine {0|1}     Run production two-pass first+refinement (default 1)\n"
+                          "  --targets MIN:MAX  Target range (default 1:gridH-1)\n");
+}
+
+static bool ParseIntArg(const char* val, int& out, const char* argName)
+{
+    char* endp = NULL;
+    errno      = 0;
+    long v     = strtol(val, &endp, 10);
+    if (endp == val || *endp != '\0' || errno == ERANGE || v < INT_MIN || v > INT_MAX)
+    {
+        (void)fprintf(stderr, "Invalid integer for %s: %s\n", argName, val);
+        return false;
+    }
+    out = (int)v;
+    return true;
 }
 
 static bool ParseArgs(int argc, char** argv, Args& out)
@@ -62,22 +81,47 @@ static bool ParseArgs(int argc, char** argv, Args& out)
     for (int i = 1; i < argc; ++i)
     {
         std::string a = argv[i];
-        if (a == "--corpus" && i + 1 < argc) out.corpusDir = argv[++i];
-        else if (a == "--config" && i + 1 < argc) out.configFile = argv[++i];
-        else if (a == "--out" && i + 1 < argc) out.outFile = argv[++i];
-        else if (a == "--seeds" && i + 1 < argc) out.numSeeds = atoi(argv[++i]);
-        else if (a == "--base-seed" && i + 1 < argc) out.baseSeed = (unsigned int)atoi(argv[++i]);
-        else if (a == "--rotate" && i + 1 < argc) out.rotateMode = atoi(argv[++i]);
-        else if (a == "--refine" && i + 1 < argc) out.refineMode = atoi(argv[++i]);
+        if (a == "--corpus" && i + 1 < argc)
+        {
+            out.corpusDir = argv[++i];
+        }
+        else if (a == "--config" && i + 1 < argc)
+        {
+            out.configFile = argv[++i];
+        }
+        else if (a == "--out" && i + 1 < argc)
+        {
+            out.outFile = argv[++i];
+        }
+        else if (a == "--seeds" && i + 1 < argc)
+        {
+            if (!ParseIntArg(argv[++i], out.numSeeds, "--seeds")) return false;
+        }
+        else if (a == "--base-seed" && i + 1 < argc)
+        {
+            int tmp;
+            if (!ParseIntArg(argv[++i], tmp, "--base-seed")) return false;
+            out.baseSeed = (unsigned int)tmp;
+        }
+        else if (a == "--rotate" && i + 1 < argc)
+        {
+            if (!ParseIntArg(argv[++i], out.rotateMode, "--rotate")) return false;
+        }
+        else if (a == "--refine" && i + 1 < argc)
+        {
+            if (!ParseIntArg(argv[++i], out.refineMode, "--refine")) return false;
+        }
         else if (a == "--targets" && i + 1 < argc)
         {
             std::string r = argv[++i];
             size_t colon  = r.find(':');
-            if (colon != std::string::npos)
+            if (colon == std::string::npos)
             {
-                out.minTarget = atoi(r.substr(0, colon).c_str());
-                out.maxTarget = atoi(r.substr(colon + 1).c_str());
+                (void)fprintf(stderr, "Invalid --targets format (expected MIN:MAX): %s\n", r.c_str());
+                return false;
             }
+            if (!ParseIntArg(r.substr(0, colon).c_str(), out.minTarget, "--targets MIN")) return false;
+            if (!ParseIntArg(r.substr(colon + 1).c_str(), out.maxTarget, "--targets MAX")) return false;
         }
         else if (a == "--help" || a == "-h")
         {
@@ -86,7 +130,7 @@ static bool ParseArgs(int argc, char** argv, Args& out)
         }
         else
         {
-            fprintf(stderr, "Unknown arg: %s\n", a.c_str());
+            (void)fprintf(stderr, "Unknown arg: %s\n", a.c_str());
             PrintUsage();
             return false;
         }
@@ -239,7 +283,7 @@ static std::vector<std::string> BuildHeader()
     return h;
 }
 
-int main(int argc, char** argv)
+static int run(int argc, char** argv)
 {
     Args args;
     if (!ParseArgs(argc, argv, args)) return 1;
@@ -270,19 +314,22 @@ int main(int argc, char** argv)
     std::string err;
     if (!ParseConfigFile(baselinePath, Packer::SearchParams::defaults(), baselineCfg, err))
     {
-        fprintf(stderr, "Baseline config error: %s\n", err.c_str());
+        (void)fprintf(stderr, "Baseline config error: %s\n", err.c_str());
         return 1;
     }
 
     HarnessConfig targetCfg;
     {
-        std::string a = args.configFile;
-        std::string b = baselinePath;
+        const std::string& a = args.configFile;
+        const std::string& b = baselinePath;
         // Normalize trivial path differences before comparing
-        if (a == b) targetCfg = baselineCfg;
+        if (a == b)
+        {
+            targetCfg = baselineCfg;
+        }
         else if (!ParseConfigFile(args.configFile, baselineCfg.params, targetCfg, err))
         {
-            fprintf(stderr, "Target config error: %s\n", err.c_str());
+            (void)fprintf(stderr, "Target config error: %s\n", err.c_str());
             return 1;
         }
     }
@@ -290,14 +337,14 @@ int main(int argc, char** argv)
     std::vector<std::string> instancePaths = ListInstanceFiles(args.corpusDir);
     if (instancePaths.empty())
     {
-        fprintf(stderr, "No instance files in %s\n", args.corpusDir.c_str());
+        (void)fprintf(stderr, "No instance files in %s\n", args.corpusDir.c_str());
         return 1;
     }
 
     CsvWriter csv;
     if (!csv.Open(args.outFile))
     {
-        fprintf(stderr, "Cannot open output %s\n", args.outFile.c_str());
+        (void)fprintf(stderr, "Cannot open output %s\n", args.outFile.c_str());
         return 1;
     }
 
@@ -314,19 +361,18 @@ int main(int argc, char** argv)
         Instance inst;
         if (!ParseInstanceFile(instancePaths[ii], inst, err))
         {
-            fprintf(stderr, "Skip %s: %s\n", instancePaths[ii].c_str(), err.c_str());
+            (void)fprintf(stderr, "Skip %s: %s\n", instancePaths[ii].c_str(), err.c_str());
             continue;
         }
 
         for (size_t j = 0; j < inst.items.size(); ++j)
             inst.items[j].canRotate = (args.rotateMode != 0);
 
-        int maxT = inst.gridH - 1;
-        if (maxT < 1) maxT = 1;
+        int maxT   = std::max(inst.gridH - 1, 1);
         int startT = (args.minTarget > 0) ? args.minTarget : 1;
         int endT   = (args.maxTarget > 0) ? args.maxTarget : maxT;
-        if (endT > maxT) endT = maxT;
-        if (startT < 1) startT = 1;
+        endT       = std::min(endT, maxT);
+        startT     = std::max(startT, 1);
 
         std::set<int> types;
         int totalArea = 0;
@@ -536,10 +582,33 @@ int main(int argc, char** argv)
             }
         }
 
-        fprintf(stdout, "[%s] %dx%d, %d items, density %.2f, targets %d..%d\n", inst.name.c_str(), inst.gridW,
-                inst.gridH, (int)inst.items.size(), density, startT, endT);
+        (void)fprintf(stdout, "[%s] %dx%d, %d items, density %.2f, targets %d..%d\n", inst.name.c_str(), inst.gridW,
+                      inst.gridH, (int)inst.items.size(), density, startT, endT);
     }
 
-    fprintf(stdout, "Total runs: %d -> %s\n", totalRuns, args.outFile.c_str());
+    if (!csv.Close())
+    {
+        (void)fprintf(stderr, "CSV write error on %s: output may be truncated\n", args.outFile.c_str());
+        return 1;
+    }
+    (void)fprintf(stdout, "Total runs: %d -> %s\n", totalRuns, args.outFile.c_str());
     return 0;
+}
+
+int main(int argc, char** argv)
+{
+    try
+    {
+        return run(argc, argv);
+    }
+    catch (const std::exception& e)
+    {
+        (void)fprintf(stderr, "FATAL: %s\n", e.what());
+        return 1;
+    }
+    catch (...)
+    {
+        (void)fprintf(stderr, "FATAL: unknown exception\n");
+        return 1;
+    }
 }

@@ -3,8 +3,11 @@
 
 # --- Root ---
 /*
+!/.clang-format
+!/.clangd
 !/.gitattributes
 !/.gitignore
+!/.pre-commit-config.yaml
 !/LICENSE
 !/README.md
 !/StackSort.vcxproj
@@ -36,7 +39,8 @@
 /tests/corpus/*
 !/tests/corpus/*.txt
 
-# --- tests/harness/: only C++ source ---
+# --- tests/harness/: ---
 /tests/harness/*
 !/tests/harness/*.cpp
 !/tests/harness/*.h
+!/tests/harness/.clang-tidy

@@ -3,9 +3,11 @@
 
 #include "Config.h"
 
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
-#include <cstdlib>
 
 static std::string StripComments(const std::string& line)
 {
@@ -45,6 +47,24 @@ static std::string StemFromPath(const std::string& path)
     size_t dot       = base.find_last_of('.');
     if (dot == std::string::npos) return base;
     return base.substr(0, dot);
+}
+
+static bool ParseInt(const std::string& val, int& out, std::string& errMsg, const std::string& file, int line,
+                     const std::string& key)
+{
+    const char* s = val.c_str();
+    char* endp    = NULL;
+    errno         = 0;
+    long v        = std::strtol(s, &endp, 10);
+    if (endp == s || *endp != '\0' || errno == ERANGE || v < INT_MIN || v > INT_MAX)
+    {
+        std::ostringstream ee;
+        ee << file << ":" << line << ": invalid integer for '" << key << "': " << val;
+        errMsg = ee.str();
+        return false;
+    }
+    out = (int)v;
+    return true;
 }
 
 bool ParseConfigFile(const std::string& filePath, const Packer::SearchParams& base, HarnessConfig& out,
@@ -101,17 +121,43 @@ bool ParseConfigFile(const std::string& filePath, const Packer::SearchParams& ba
 
         if (section == "search")
         {
-            if (key == "num_restarts") out.params.numRestarts = atoi(val.c_str());
-            else if (key == "iters_per_restart") out.params.itersPerRestart = atoi(val.c_str());
-            else if (key == "lahc_history_len") out.params.lahcHistoryLen = atoi(val.c_str());
-            else if (key == "plateau_threshold") out.params.plateauThreshold = atoi(val.c_str());
-            else if (key == "rng_seed") out.params.rngSeed = (unsigned int)atoi(val.c_str());
+            if (key == "num_restarts")
+            {
+                if (!ParseInt(val, out.params.numRestarts, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "iters_per_restart")
+            {
+                if (!ParseInt(val, out.params.itersPerRestart, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "lahc_history_len")
+            {
+                if (!ParseInt(val, out.params.lahcHistoryLen, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "plateau_threshold")
+            {
+                if (!ParseInt(val, out.params.plateauThreshold, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "rng_seed")
+            {
+                int tmp;
+                if (!ParseInt(val, tmp, errMsg, filePath, lineNum, key)) return false;
+                out.params.rngSeed = (unsigned int)tmp;
+            }
         }
         else if (section == "moves")
         {
-            if (key == "swap_pct") swapPct = atoi(val.c_str());
-            else if (key == "insert_pct") insertPct = atoi(val.c_str());
-            else if (key == "rotate_pct") rotatePct = atoi(val.c_str());
+            if (key == "swap_pct")
+            {
+                if (!ParseInt(val, swapPct, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "insert_pct")
+            {
+                if (!ParseInt(val, insertPct, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "rotate_pct")
+            {
+                if (!ParseInt(val, rotatePct, errMsg, filePath, lineNum, key)) return false;
+            }
             // repair_pct is implicit: 100 - (swap + insert + rotate)
         }
         else if (section == "features")
@@ -126,23 +172,56 @@ bool ParseConfigFile(const std::string& filePath, const Packer::SearchParams& ba
         }
         else if (section == "scoring")
         {
-            if (key == "grouping_weight") out.params.scoringGroupingWeight = atoi(val.c_str());
-            else if (key == "frag_weight") out.params.scoringFragWeight = atoi(val.c_str());
-            else if (key == "grouping_power_quarters") out.params.groupingPowerQuarters = atoi(val.c_str());
+            if (key == "grouping_weight")
+            {
+                if (!ParseInt(val, out.params.scoringGroupingWeight, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "frag_weight")
+            {
+                if (!ParseInt(val, out.params.scoringFragWeight, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "grouping_power_quarters")
+            {
+                if (!ParseInt(val, out.params.groupingPowerQuarters, errMsg, filePath, lineNum, key)) return false;
+            }
         }
         else if (section == "skyline")
         {
-            if (key == "waste_coef") out.params.skylineWasteCoef = atoi(val.c_str());
+            if (key == "waste_coef")
+            {
+                if (!ParseInt(val, out.params.skylineWasteCoef, errMsg, filePath, lineNum, key)) return false;
+            }
         }
         else if (section == "refine")
         {
-            if (key == "num_restarts") out.refineRestarts = atoi(val.c_str());
-            else if (key == "iters_per_restart") out.refineIters = atoi(val.c_str());
-            else if (key == "lahc_history_len") out.refineLahcHist = atoi(val.c_str());
-            else if (key == "plateau_threshold") out.refinePlateau = atoi(val.c_str());
-            else if (key == "always") out.refineAlways = ParseBool(val, false) ? 1 : 0;
-            else if (key == "stranded_max") out.refineStrandedMax = atoi(val.c_str());
-            else if (key == "item_threshold") out.refineItemThreshold = atoi(val.c_str());
+            if (key == "num_restarts")
+            {
+                if (!ParseInt(val, out.refineRestarts, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "iters_per_restart")
+            {
+                if (!ParseInt(val, out.refineIters, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "lahc_history_len")
+            {
+                if (!ParseInt(val, out.refineLahcHist, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "plateau_threshold")
+            {
+                if (!ParseInt(val, out.refinePlateau, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "always")
+            {
+                out.refineAlways = ParseBool(val, false) ? 1 : 0;
+            }
+            else if (key == "stranded_max")
+            {
+                if (!ParseInt(val, out.refineStrandedMax, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "item_threshold")
+            {
+                if (!ParseInt(val, out.refineItemThreshold, errMsg, filePath, lineNum, key)) return false;
+            }
         }
     }
 
