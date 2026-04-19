@@ -356,6 +356,8 @@ class Packer
         int skylineCount;
         int gridDeltaStart;
         int gridDeltaCount;
+        unsigned long long hashA;
+        unsigned long long hashB;
     };
 
     // Reusable scratch buffers for the packing hot path. Construct once
@@ -375,10 +377,18 @@ class Packer
         std::vector<int> regionAreas;            // Concentration+Stranded: area per region
         std::vector<int> regionInterior;         // Concentration+Stranded: interior-cell count per region
         std::vector<unsigned char> regionHasLer; // Concentration+Stranded: LER-connectivity flag per region
-        std::vector<SkylineNode> skyline;        // SkylinePack state
-        std::vector<SkylineNode> skylineTmp;     // SkylinePack update scratch
-        std::vector<Rect> wasteRects;            // Skyline waste map (under-cliff gaps)
-        std::vector<int> placementIdGrid;        // SkylinePack: placement index per cell (-1 = empty)
+        // Skyline state as an intrusive singly-linked list over a fixed arena.
+        // Head walks left-to-right by x; x-order is invariant by construction.
+        // SKYLINE_ARENA_CAP comfortably covers the 20-wide corpus worst case
+        // (each placement adds at most 2 segments before coalesce).
+        static const int SKYLINE_ARENA_CAP = 128;
+        SkylineNode skylineNodes[SKYLINE_ARENA_CAP];
+        short skylineNext[SKYLINE_ARENA_CAP];
+        short skylineHead;
+        short skylineFreeHead;
+        short skylineCount;
+        std::vector<Rect> wasteRects;     // Skyline waste map (under-cliff gaps)
+        std::vector<int> placementIdGrid; // SkylinePack: placement index per cell (-1 = empty)
 
         // Per-exactId placement count. 512 cap is a soft limit — exactIds at
         // or above fall back to full scan (correctness preserved; corpora
@@ -419,6 +429,25 @@ class Packer
         GridCacheEntry gridCache[64];
         int gridCacheCount;
         int gridCacheHead;
+
+        // Parallel per-slot grid copy for memcmp fallback on hash hit — kills
+        // the 2^-128 twin-Zobrist collision tail so behavior is bit-exact
+        // regardless of which cache key function is used. Sized 64*totalCells
+        // in InitPackContext.
+        std::vector<unsigned char> gridCacheGridBlob;
+
+        // Zobrist keying for GridCacheLookup. Tables are pure functions of
+        // (gridW, gridH) seeded via splitmix64 with independent constants
+        // per table, so the twin-hash retains 128-bit entropy. curHashA/B
+        // is XOR-maintained incrementally via EmitBoundary; each
+        // SkylineBoundary snapshots the post-placement hash so
+        // RestoreSkylineState can reload it in O(1).
+        std::vector<unsigned long long> zobristA;
+        std::vector<unsigned long long> zobristB;
+        unsigned long long curHashA;
+        unsigned long long curHashB;
+        int zobristTableW;
+        int zobristTableH;
 
         // skylineSnapValid must be false whenever the log does not
         // correspond to the current curOrder — restart, abort, or

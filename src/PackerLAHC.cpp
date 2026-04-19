@@ -176,9 +176,24 @@ static void RestoreSkylineState(Packer::PackContext& ctx, int /*gridW*/, int /*g
     ctx.wasteRects.reserve((size_t)b.wasteCount);
     ctx.wasteRects.assign(ctx.skylineSnapWaste.begin() + b.wasteStart,
                           ctx.skylineSnapWaste.begin() + b.wasteStart + b.wasteCount);
-    ctx.skyline.reserve((size_t)b.skylineCount);
-    ctx.skyline.assign(ctx.skylineSnapSkyline.begin() + b.skylineStart,
-                       ctx.skylineSnapSkyline.begin() + b.skylineStart + b.skylineCount);
+
+    // Rebuild the skyline linked-list arena from the saved linear slice.
+    ctx.skylineHead     = -1;
+    ctx.skylineFreeHead = -1;
+    ctx.skylineCount    = 0;
+    short tail          = -1;
+    for (int i = 0; i < b.skylineCount; ++i)
+    {
+        short idx             = ctx.skylineCount++;
+        ctx.skylineNodes[idx] = ctx.skylineSnapSkyline[(size_t)b.skylineStart + (size_t)i];
+        ctx.skylineNext[idx]  = -1;
+        if (tail < 0) ctx.skylineHead = idx;
+        else ctx.skylineNext[tail] = idx;
+        tail = idx;
+    }
+
+    ctx.curHashA = b.hashA;
+    ctx.curHashB = b.hashB;
 
     for (int k = keptPrefix + 1; k <= ctx.skylineSnapN; ++k)
     {

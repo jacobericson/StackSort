@@ -3,6 +3,14 @@
 #include <algorithm>
 #include <cstring>
 
+static unsigned long long splitmix64_next(unsigned long long* state)
+{
+    unsigned long long z = (*state += 0x9E3779B97F4A7C15ULL);
+    z                    = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    z                    = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+    return z ^ (z >> 31);
+}
+
 // Named functor for VS2010 (no lambdas).
 
 struct ItemSortCompare
@@ -63,6 +71,30 @@ void Packer::InitPackContext(PackContext& ctx, int gridW, int gridH, int numItem
     ctx.pairWeightMatrixN = 0;
     ctx.gridCacheCount    = 0;
     ctx.gridCacheHead     = 0;
+    ctx.gridCacheGridBlob.resize((size_t)64 * (size_t)totalCells);
+
+    // Seed Zobrist tables from grid dimensions only — cache entries survive
+    // restart boundaries so the key must be stable across restarts. Skip
+    // reseed when a reused ctx has matching dims; empty() catches
+    // default-constructed ctx where zobristTableW/H are still uninitialized.
+    if (ctx.zobristA.empty() || ctx.zobristTableW != gridW || ctx.zobristTableH != gridH)
+    {
+        ctx.zobristA.resize((size_t)totalCells);
+        ctx.zobristB.resize((size_t)totalCells);
+        unsigned long long stateA =
+            0xA5A5A5A5A5A5A5A5ULL ^ ((unsigned long long)gridW * 131ULL) ^ ((unsigned long long)gridH * 7919ULL);
+        unsigned long long stateB =
+            0x5A5A5A5A5A5A5A5AULL ^ ((unsigned long long)gridW * 983ULL) ^ ((unsigned long long)gridH * 1733ULL);
+        for (int i = 0; i < totalCells; ++i)
+        {
+            ctx.zobristA[(size_t)i] = splitmix64_next(&stateA);
+            ctx.zobristB[(size_t)i] = splitmix64_next(&stateB);
+        }
+        ctx.zobristTableW = gridW;
+        ctx.zobristTableH = gridH;
+    }
+    ctx.curHashA = 0;
+    ctx.curHashB = 0;
     ctx.skylineSnapBoundaries.reserve((size_t)numItems + 1);
     ctx.skylineSnapWaste.reserve((size_t)numItems * 30);
     ctx.skylineSnapSkyline.reserve((size_t)numItems * 20);

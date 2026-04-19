@@ -27,6 +27,40 @@
 // Bounded by the number of items that can physically touch a single item.
 static const int MAX_ADJ = 16;
 
+static short SkylineAllocNode(Packer::PackContext& ctx)
+{
+    short idx;
+    if (ctx.skylineFreeHead >= 0)
+    {
+        idx                 = ctx.skylineFreeHead;
+        ctx.skylineFreeHead = ctx.skylineNext[idx];
+    }
+    else
+    {
+        idx = ctx.skylineCount++;
+    }
+    ctx.skylineNext[idx] = -1;
+    return idx;
+}
+
+static void SkylineFreeNode(Packer::PackContext& ctx, short idx)
+{
+    ctx.skylineNext[idx] = ctx.skylineFreeHead;
+    ctx.skylineFreeHead  = idx;
+}
+
+static void SkylineReset(Packer::PackContext& ctx, int gridW)
+{
+    ctx.skylineHead              = -1;
+    ctx.skylineFreeHead          = -1;
+    ctx.skylineCount             = 0;
+    short head                   = SkylineAllocNode(ctx);
+    ctx.skylineNodes[head].x     = 0;
+    ctx.skylineNodes[head].y     = 0;
+    ctx.skylineNodes[head].width = gridW;
+    ctx.skylineHead              = head;
+}
+
 // placeW == 0 is the no-placement sentinel; boundaries must still advance
 // in lock-step with idx for unfittable items so index = placements.size()+
 // unfittable_count invariant holds.
@@ -37,17 +71,31 @@ static void EmitBoundary(Packer::PackContext& ctx, int gridW, int placeX, int pl
     b.wasteStart      = (int)ctx.skylineSnapWaste.size();
     b.wasteCount      = (int)ctx.wasteRects.size();
     ctx.skylineSnapWaste.insert(ctx.skylineSnapWaste.end(), ctx.wasteRects.begin(), ctx.wasteRects.end());
-    b.skylineStart = (int)ctx.skylineSnapSkyline.size();
-    b.skylineCount = (int)ctx.skyline.size();
-    ctx.skylineSnapSkyline.insert(ctx.skylineSnapSkyline.end(), ctx.skyline.begin(), ctx.skyline.end());
+    b.skylineStart   = (int)ctx.skylineSnapSkyline.size();
+    int skylineCount = 0;
+    for (short s = ctx.skylineHead; s >= 0; s = ctx.skylineNext[s])
+    {
+        ctx.skylineSnapSkyline.push_back(ctx.skylineNodes[s]);
+        ++skylineCount;
+    }
+    b.skylineCount   = skylineCount;
     b.gridDeltaStart = (int)ctx.skylineSnapGridDelta.size();
     if (placeW > 0)
     {
+        const unsigned long long* zA = &ctx.zobristA[0];
+        const unsigned long long* zB = &ctx.zobristB[0];
         for (int dy = 0; dy < placeH; ++dy)
             for (int dx = 0; dx < placeW; ++dx)
-                ctx.skylineSnapGridDelta.push_back((placeY + dy) * gridW + (placeX + dx));
+            {
+                int cellIdx = (placeY + dy) * gridW + (placeX + dx);
+                ctx.skylineSnapGridDelta.push_back(cellIdx);
+                ctx.curHashA ^= zA[cellIdx];
+                ctx.curHashB ^= zB[cellIdx];
+            }
     }
     b.gridDeltaCount = (int)ctx.skylineSnapGridDelta.size() - b.gridDeltaStart;
+    b.hashA          = ctx.curHashA;
+    b.hashB          = ctx.curHashB;
     ctx.skylineSnapBoundaries.push_back(b);
 }
 
@@ -88,13 +136,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
     if (startIdx == 0)
     {
         ctx.placements.clear();
-        ctx.skyline.clear();
-
-        SkylineNode initial;
-        initial.x     = 0;
-        initial.y     = 0;
-        initial.width = gridW;
-        ctx.skyline.push_back(initial);
+        SkylineReset(ctx, gridW);
 
         ctx.wasteRects.clear();
 
@@ -106,6 +148,8 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         ctx.skylineSnapSkyline.clear();
         ctx.skylineSnapGridDelta.clear();
         memset(ctx.typeCount, 0, sizeof(ctx.typeCount));
+        ctx.curHashA = 0;
+        ctx.curHashB = 0;
         EmitBoundary(ctx, gridW, 0, 0, 0, 0);
     }
     else
@@ -243,9 +287,9 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                 int iw = (ori == 0) ? item.w : item.h;
                 int ih = (ori == 0) ? item.h : item.w;
 
-                for (size_t si = 0; si < ctx.skyline.size(); ++si)
+                for (short si = ctx.skylineHead; si >= 0; si = ctx.skylineNext[si])
                 {
-                    int x = ctx.skyline[si].x;
+                    int x = ctx.skylineNodes[si].x;
                     if (x + iw > gridW) continue;
                     SUBPHASE_BEGIN(cand);
 
@@ -272,9 +316,9 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                     int widthCovered = 0;
                     bool aborted     = false;
 
-                    for (size_t sj = si; sj < ctx.skyline.size(); ++sj)
+                    for (short sj = si; sj >= 0; sj = ctx.skylineNext[sj])
                     {
-                        int segY = ctx.skyline[sj].y;
+                        int segY = ctx.skylineNodes[sj].y;
                         if (segY > maxY)
                         {
                             maxY = segY;
@@ -284,8 +328,8 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                                 break;
                             }
                         }
-                        int segLeft      = ctx.skyline[sj].x;
-                        int segRight     = segLeft + ctx.skyline[sj].width;
+                        int segLeft      = ctx.skylineNodes[sj].x;
+                        int segRight     = segLeft + ctx.skylineNodes[sj].width;
                         int overlapLeft  = (x > segLeft) ? x : segLeft;
                         int overlapRight = ((x + iw) < segRight) ? (x + iw) : segRight;
                         int overlapW     = overlapRight - overlapLeft;
@@ -392,81 +436,123 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         int placeRight = bestX + bestW;
         int placeTop   = bestY + bestH;
 
-        for (size_t sj = 0; sj < ctx.skyline.size(); ++sj)
+        for (short sj = ctx.skylineHead; sj >= 0; sj = ctx.skylineNext[sj])
         {
-            int segLeft  = ctx.skyline[sj].x;
-            int segRight = segLeft + ctx.skyline[sj].width;
+            int segLeft  = ctx.skylineNodes[sj].x;
+            int segRight = segLeft + ctx.skylineNodes[sj].width;
             if (segRight <= placeLeft || segLeft >= placeRight) continue;
 
             int overlapLeft  = (placeLeft > segLeft) ? placeLeft : segLeft;
             int overlapRight = (placeRight < segRight) ? placeRight : segRight;
             int overlapW     = overlapRight - overlapLeft;
-            int gapH         = bestY - ctx.skyline[sj].y;
+            int gapH         = bestY - ctx.skylineNodes[sj].y;
             if (overlapW > 0 && gapH > 0)
             {
                 Rect waste;
                 waste.x = overlapLeft;
-                waste.y = ctx.skyline[sj].y;
+                waste.y = ctx.skylineNodes[sj].y;
                 waste.w = overlapW;
                 waste.h = gapH;
                 ctx.wasteRects.push_back(waste);
             }
         }
 
-        ctx.skylineTmp.clear();
-
-        for (size_t si = 0; si < ctx.skyline.size(); ++si)
+        // In-place splice: walk overlapping nodes, shrink/split/unlink as
+        // needed, then insert itemSeg at its x-order position and coalesce
+        // with same-y neighbours. Prev walks with cur so unlinks relink
+        // prev->next in O(1).
+        short insertAfter = -1;
+        short cur         = ctx.skylineHead;
+        short prev        = -1;
+        while (cur >= 0)
         {
-            int segLeft  = ctx.skyline[si].x;
-            int segRight = segLeft + ctx.skyline[si].width;
+            int segLeft  = ctx.skylineNodes[cur].x;
+            int segRight = segLeft + ctx.skylineNodes[cur].width;
+            short next   = ctx.skylineNext[cur];
 
-            if (segRight <= placeLeft || segLeft >= placeRight)
+            if (segRight <= placeLeft)
             {
-                ctx.skylineTmp.push_back(ctx.skyline[si]);
+                insertAfter = cur;
+                prev        = cur;
+                cur         = next;
+                continue;
+            }
+            if (segLeft >= placeRight)
+            {
+                break;
+            }
+
+            bool hasLeft  = segLeft < placeLeft;
+            bool hasRight = segRight > placeRight;
+
+            if (hasLeft && hasRight)
+            {
+                ctx.skylineNodes[cur].width      = placeLeft - segLeft;
+                short rightIdx                   = SkylineAllocNode(ctx);
+                ctx.skylineNodes[rightIdx].x     = placeRight;
+                ctx.skylineNodes[rightIdx].y     = ctx.skylineNodes[cur].y;
+                ctx.skylineNodes[rightIdx].width = segRight - placeRight;
+                ctx.skylineNext[rightIdx]        = next;
+                ctx.skylineNext[cur]             = rightIdx;
+                insertAfter                      = cur;
+                prev                             = rightIdx;
+                cur                              = next;
+            }
+            else if (hasLeft)
+            {
+                ctx.skylineNodes[cur].width = placeLeft - segLeft;
+                insertAfter                 = cur;
+                prev                        = cur;
+                cur                         = next;
+            }
+            else if (hasRight)
+            {
+                ctx.skylineNodes[cur].x     = placeRight;
+                ctx.skylineNodes[cur].width = segRight - placeRight;
+                prev                        = cur;
+                cur                         = next;
             }
             else
             {
-                if (segLeft < placeLeft)
-                {
-                    SkylineNode left;
-                    left.x     = segLeft;
-                    left.y     = ctx.skyline[si].y;
-                    left.width = placeLeft - segLeft;
-                    ctx.skylineTmp.push_back(left);
-                }
-                if (segRight > placeRight)
-                {
-                    SkylineNode right;
-                    right.x     = placeRight;
-                    right.y     = ctx.skyline[si].y;
-                    right.width = segRight - placeRight;
-                    ctx.skylineTmp.push_back(right);
-                }
+                if (prev < 0) ctx.skylineHead = next;
+                else ctx.skylineNext[prev] = next;
+                SkylineFreeNode(ctx, cur);
+                cur = next;
             }
         }
 
-        SkylineNode itemSeg;
-        itemSeg.x     = placeLeft;
-        itemSeg.y     = placeTop;
-        itemSeg.width = bestW;
+        short itemSeg                   = SkylineAllocNode(ctx);
+        ctx.skylineNodes[itemSeg].x     = placeLeft;
+        ctx.skylineNodes[itemSeg].y     = placeTop;
+        ctx.skylineNodes[itemSeg].width = bestW;
 
-        size_t insertPos = 0;
-        while (insertPos < ctx.skylineTmp.size() && ctx.skylineTmp[insertPos].x < placeLeft)
-            ++insertPos;
-        ctx.skylineTmp.insert(ctx.skylineTmp.begin() + insertPos, itemSeg);
-
-        ctx.skyline.clear();
-        for (size_t si = 0; si < ctx.skylineTmp.size(); ++si)
+        if (insertAfter < 0)
         {
-            if (!ctx.skyline.empty() && ctx.skyline.back().y == ctx.skylineTmp[si].y &&
-                ctx.skyline.back().x + ctx.skyline.back().width == ctx.skylineTmp[si].x)
-            {
-                ctx.skyline.back().width += ctx.skylineTmp[si].width;
-            }
-            else
-            {
-                ctx.skyline.push_back(ctx.skylineTmp[si]);
-            }
+            ctx.skylineNext[itemSeg] = ctx.skylineHead;
+            ctx.skylineHead          = itemSeg;
+        }
+        else
+        {
+            ctx.skylineNext[itemSeg]     = ctx.skylineNext[insertAfter];
+            ctx.skylineNext[insertAfter] = itemSeg;
+        }
+
+        if (insertAfter >= 0 && ctx.skylineNodes[insertAfter].y == placeTop &&
+            ctx.skylineNodes[insertAfter].x + ctx.skylineNodes[insertAfter].width == placeLeft)
+        {
+            ctx.skylineNodes[insertAfter].width += ctx.skylineNodes[itemSeg].width;
+            ctx.skylineNext[insertAfter] = ctx.skylineNext[itemSeg];
+            SkylineFreeNode(ctx, itemSeg);
+            itemSeg = insertAfter;
+        }
+
+        short succ = ctx.skylineNext[itemSeg];
+        if (succ >= 0 && ctx.skylineNodes[succ].y == ctx.skylineNodes[itemSeg].y &&
+            ctx.skylineNodes[itemSeg].x + ctx.skylineNodes[itemSeg].width == ctx.skylineNodes[succ].x)
+        {
+            ctx.skylineNodes[itemSeg].width += ctx.skylineNodes[succ].width;
+            ctx.skylineNext[itemSeg] = ctx.skylineNext[succ];
+            SkylineFreeNode(ctx, succ);
         }
 
         EmitBoundary(ctx, gridW, bestX, bestY, bestW, bestH);
