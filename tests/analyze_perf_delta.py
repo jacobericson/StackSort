@@ -30,13 +30,19 @@ except ImportError:
 JOIN_KEYS = ["config_name", "instance_name", "seed", "target", "rotate_all"]
 
 PHASES = [
-    ("fp_cycles_move_gen",      "MoveGen"),
-    ("fp_cycles_skyline_pack",  "SkylinePack"),
-    ("fp_cycles_ler",           "LER"),
-    ("fp_cycles_concentration", "Concentration"),
-    ("fp_cycles_grouping",      "Grouping"),
-    ("fp_cycles_score",         "Score"),
-    ("fp_cycles_accept",        "Accept"),
+    ("fp_cycles_move_gen",           "MoveGen"),
+    ("fp_cycles_skyline_pack",       "SkylinePack"),
+    ("fp_cycles_skyline_waste_map",  "  Skyline.WasteMap"),
+    ("fp_cycles_skyline_candidate",  "  Skyline.Candidate"),
+    ("fp_cycles_skyline_adjacency",  "  Skyline.Adjacency"),
+    ("fp_cycles_skyline_commit",     "  Skyline.Commit"),
+    ("fp_cycles_ler",                "LER"),
+    ("fp_cycles_ler_histogram",      "  LER.Histogram"),
+    ("fp_cycles_ler_stack",          "  LER.Stack"),
+    ("fp_cycles_concentration",      "Concentration"),
+    ("fp_cycles_grouping",           "Grouping"),
+    ("fp_cycles_score",              "Score"),
+    ("fp_cycles_accept",             "Accept"),
 ]
 
 
@@ -101,17 +107,26 @@ def main():
     out.append("|---|---:|---:|---:|---:|---:|")
     total_b = 0.0
     total_a = 0.0
+    subphase_skipped = False
     for col, label in PHASES:
         bc, ac = col + "_b", col + "_a"
         if bc not in merged.columns:
             continue
         b = merged[bc].median()
         a = merged[ac].median()
+        # Sub-phase counters (indented labels) are populated only by builds
+        # with STACKSORT_PROFILE_SUBPHASE=1. If both sides report zero the
+        # measurement was off — skip the row so it doesn't clutter the table.
+        if label.startswith("  ") and b == 0 and a == 0:
+            subphase_skipped = True
+            continue
         delta = a - b
         pct = 100.0 * delta / b if b else 0.0
         faster = int((merged[ac] < merged[bc]).sum())
-        total_b += b
-        total_a += a
+        # Indented labels are sub-phases of their parent — already counted in parent.
+        if not label.startswith("  "):
+            total_b += b
+            total_a += a
         out.append("| {} | {} | {} | {} | {:+.1f}% | {}/{} |".format(
             label, _fmt(b), _fmt(a), _fmt(delta), pct, faster, n))
     total_delta = total_a - total_b
@@ -119,6 +134,10 @@ def main():
     out.append("| **Inner loop total** | **{}** | **{}** | **{}** | **{:+.1f}%** | - |".format(
         _fmt(total_b), _fmt(total_a), _fmt(total_delta), total_pct))
     out.append("")
+    if subphase_skipped:
+        out.append("_Sub-phase rows (indented) hidden — build with "
+                   "`STACKSORT_PROFILE_SUBPHASE=1` for per-candidate breakdown._")
+        out.append("")
 
     # Per-instance LER+Conc combined (the Phase 4 signal)
     if "fp_cycles_ler_b" in merged.columns and "fp_cycles_concentration_b" in merged.columns:

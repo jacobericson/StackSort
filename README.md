@@ -60,6 +60,18 @@ Requires:
 
 Link dependencies: `KenshiLib.lib`, `MyGUIEngine_x64.lib`
 
+### Benchmark harness builds
+
+The standalone harness at `tests/harness/build.bat` produces three binary variants controlled by env vars:
+
+| Env | Output | Purpose |
+|---|---|---|
+| (none) | `stacksort_bench.exe` | Production build — use for bitmatch/quality runs. |
+| `STACKSORT_PROFILE=1` | `stacksort_bench_profile.exe` | Coarse per-phase rdtsc counters (MoveGen / SkylinePack / LER / etc.) emitted as `fp_cycles_*` CSV columns. Use for apples-to-apples perf comparisons. |
+| `STACKSORT_PROFILE_SUBPHASE=1` | `stacksort_bench_subphase.exe` | Adds per-candidate sub-phase counters (`skyline_waste_map`, `skyline_candidate`, `skyline_adjacency`, `skyline_commit`, `ler_histogram`, `ler_stack`). Adds ~30% overhead to SkylinePack — use for bottleneck drill-down, not for cycle comparisons. |
+
+The three objdirs (`obj`, `obj_profile`, `obj_subphase`) are separate so switching variants doesn't force a rebuild.
+
 ## How It Works
 
 The plugin hooks five game functions via KenshiLib:

@@ -38,8 +38,8 @@ void Packer::InitPackContext(PackContext& ctx, int gridW, int gridH, int numItem
     // visited-guarded concentration/stranded scans.
     memset(&ctx.visited[0], 0, totalCells);
     ctx.heights.resize(gridW);
-    ctx.lerStack.reserve(gridW + 1);
-    ctx.floodStack.reserve(totalCells);
+    ctx.lerStack.resize(gridW + 1);
+    ctx.floodStack.resize(totalCells);
     ctx.regionAreas.reserve(16);
     ctx.regionInterior.reserve(16);
     ctx.regionHasLer.reserve(16);
@@ -71,8 +71,14 @@ void Packer::InitPackContext(PackContext& ctx, int gridW, int gridH, int numItem
     ctx.skylineSnapValid = false;
     memset(ctx.typeCount, 0, sizeof(ctx.typeCount));
 #ifdef STACKSORT_PROFILE
-    ctx.profSkylinePrefixK      = 0;
-    ctx.profSkylinePrefixCycles = 0;
+    ctx.profSkylinePrefixK         = 0;
+    ctx.profSkylinePrefixCycles    = 0;
+    ctx.profCyclesSkylineWasteMap  = 0;
+    ctx.profCyclesSkylineCandidate = 0;
+    ctx.profCyclesSkylineAdjacency = 0;
+    ctx.profCyclesSkylineCommit    = 0;
+    ctx.profCyclesLerHistogram     = 0;
+    ctx.profCyclesLerStack         = 0;
 #endif
 }
 

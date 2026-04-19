@@ -288,6 +288,12 @@ static std::vector<std::string> BuildHeader()
     h.push_back("fp_grid_hash_probes");
     h.push_back("fp_grid_hash_hits");
     h.push_back("fp_cycles_skyline_prefix");
+    h.push_back("fp_cycles_skyline_waste_map");
+    h.push_back("fp_cycles_skyline_candidate");
+    h.push_back("fp_cycles_skyline_adjacency");
+    h.push_back("fp_cycles_skyline_commit");
+    h.push_back("fp_cycles_ler_histogram");
+    h.push_back("fp_cycles_ler_stack");
 #endif
     return h;
 }
@@ -620,6 +626,12 @@ static int run(int argc, char** argv)
                 row.push_back(IntToStr(firstDiag.gridHashProbes));
                 row.push_back(IntToStr(firstDiag.gridHashHits));
                 row.push_back(IntToStr(firstDiag.profCyclesSkylinePrefix));
+                row.push_back(IntToStr(firstDiag.profCyclesSkylineWasteMap));
+                row.push_back(IntToStr(firstDiag.profCyclesSkylineCandidate));
+                row.push_back(IntToStr(firstDiag.profCyclesSkylineAdjacency));
+                row.push_back(IntToStr(firstDiag.profCyclesSkylineCommit));
+                row.push_back(IntToStr(firstDiag.profCyclesLerHistogram));
+                row.push_back(IntToStr(firstDiag.profCyclesLerStack));
 #endif
                 csv.WriteRow(row);
 

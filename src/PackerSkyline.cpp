@@ -1,12 +1,26 @@
 #include "Packer.h"
 
-#include <algorithm>
 #include <climits>
 #include <cstring>
 
 #ifdef STACKSORT_PROFILE
 #include <intrin.h>
 #pragma intrinsic(__rdtsc)
+#endif
+
+// Sub-phase counters. Gated on STACKSORT_PROFILE_SUBPHASE (not PROFILE) so
+// the per-candidate rdtsc pairs don't inflate the coarse SkylinePack/LER
+// totals used for apples-to-apples optimization comparisons.
+#ifdef STACKSORT_PROFILE_SUBPHASE
+#define SUBPHASE_BEGIN(tag) unsigned long long _sp_##tag = __rdtsc()
+#define SUBPHASE_END(tag, acc)                                                                                         \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        acc += (long long)(__rdtsc() - _sp_##tag);                                                                     \
+    } while (0)
+#else
+#define SUBPHASE_BEGIN(tag) ((void)0)
+#define SUBPHASE_END(tag, acc) ((void)0)
 #endif
 
 // Maximum adjacent same-type placements to track per candidate position.
@@ -62,6 +76,8 @@ void Packer::CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>
 // placement. Quality within ~2-5% per Jylänki.
 // reserveW > 0: single-pass hard constraint (items can't overlap reserved rect).
 // reserveW == 0: two-pass soft reserve (prefer above reserveY, fallback anywhere).
+// Candidate walk computes maxY + areaUnder in one segment sweep with an
+// early abort on maxY > maxAllowedY; waste is maxY * iw - areaUnder.
 
 void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vector<Item>& items, int target,
                          const volatile long* abortFlag, int reserveX, int reserveW, int startIdx)
@@ -82,8 +98,6 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
 
         ctx.wasteRects.clear();
 
-        // Empty sentinel is -1 via 0xFF memset; CollectAdjacentPids treats
-        // any non-negative value as a real placement index.
         ctx.placementIdGrid.resize(totalCells);
         memset(&ctx.placementIdGrid[0], 0xFF, totalCells * sizeof(int));
 
@@ -96,7 +110,6 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
     }
     else
     {
-        // Snap restore truncated placements[]; rebuild typeCount to match.
         memset(ctx.typeCount, 0, sizeof(ctx.typeCount));
         for (size_t i = 0; i < ctx.placements.size(); ++i)
         {
@@ -106,9 +119,6 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
     }
 
 #ifdef STACKSORT_PROFILE
-    // Measures cycles spent on items [0..profSkylinePrefixK-1]. Those would
-    // be skipped by a Phase-3-style partial recompute. Set prefixK<=0 to
-    // skip the measurement (cold seed / restart seed calls).
     unsigned long long _sklStartTsc = __rdtsc();
     int _prefixK                    = ctx.profSkylinePrefixK;
 #endif
@@ -131,7 +141,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
 
         const Item& item = items[idx];
 
-        // Waste map: try placing in under-cliff gaps first
+        SUBPHASE_BEGIN(ws);
         bool tryRotateW   = item.canRotate && item.w != item.h;
         int numOriW       = tryRotateW ? 2 : 1;
         int bestWasteIdx  = -1;
@@ -171,7 +181,6 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
             ctx.placements.push_back(p);
             if (p.exactId >= 0 && p.exactId < 512) ++ctx.typeCount[p.exactId];
 
-            // Fill placement ID grid for contact-point scoring
             {
                 int pidx = (int)ctx.placements.size() - 1;
                 for (int dy = 0; dy < p.h; ++dy)
@@ -179,7 +188,6 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                         ctx.placementIdGrid[(p.y + dy) * gridW + (p.x + dx)] = pidx;
             }
 
-            // Guillotine split: right remainder (full height), bottom (item width)
             int remRightW  = wr.w - wasteW;
             int remBottomH = wr.h - wasteH;
             int wrx = wr.x, wry = wr.y, wrh = wr.h;
@@ -203,15 +211,14 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                 ctx.wasteRects.push_back(r);
             }
             EmitBoundary(ctx, gridW, p.x, p.y, p.w, p.h);
-            continue; // placed in waste — skip skyline search
+            SUBPHASE_END(ws, ctx.profCyclesSkylineWasteMap);
+            continue;
         }
+        SUBPHASE_END(ws, ctx.profCyclesSkylineWasteMap);
 
         bool tryRotate = item.canRotate && item.w != item.h;
         int numOri     = tryRotate ? 2 : 1;
 
-        // Find best position: minimize y (bottom-left), then minimize waste.
-        // When reserveW > 0: single pass with per-position ceiling constraint.
-        // When reserveW == 0: two-pass (pass 0 = above reserve, pass 1 = anywhere).
         int bestY              = INT_MAX;
         long long bestCombined = LLONG_MAX;
         int bestX              = -1;
@@ -223,7 +230,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
 
         for (int pass = 0; pass < numPasses; ++pass)
         {
-            if (pass == 1 && bestX >= 0) break; // pass 0 found something
+            if (pass == 1 && bestX >= 0) break;
 
             if (pass == 1)
             {
@@ -236,83 +243,75 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                 int iw = (ori == 0) ? item.w : item.h;
                 int ih = (ori == 0) ? item.h : item.w;
 
-                // Try each skyline node as a candidate left edge
                 for (size_t si = 0; si < ctx.skyline.size(); ++si)
                 {
                     int x = ctx.skyline[si].x;
                     if (x + iw > gridW) continue;
+                    SUBPHASE_BEGIN(cand);
 
-                    // Find the maximum Y across all skyline segments this item spans
-                    int maxY         = 0;
-                    int waste        = 0;
-                    int widthCovered = 0;
-                    bool fits        = true;
-
-                    for (size_t sj = si; sj < ctx.skyline.size() && widthCovered < iw; ++sj)
-                    {
-                        int segY = ctx.skyline[sj].y;
-                        maxY     = std::max(maxY, segY);
-
-                        int segLeft      = ctx.skyline[sj].x;
-                        int segRight     = segLeft + ctx.skyline[sj].width;
-                        int overlapLeft  = (x > segLeft) ? x : segLeft;
-                        int overlapRight = ((x + iw) < segRight) ? (x + iw) : segRight;
-                        int overlapW     = overlapRight - overlapLeft;
-                        if (overlapW <= 0) break;
-
-                        widthCovered += overlapW;
-                    }
-
-                    if (widthCovered < iw) continue;
-
-                    // Height constraint: hard ceiling depends on reservation
+                    int ceiling = gridH;
                     if (reserveW > 0)
                     {
-                        // Items overlapping the reserved columns are capped at reserveY
-                        int ceiling = gridH;
                         if (x < reserveX + reserveW && x + iw > reserveX) ceiling = reserveY;
-                        if (maxY + ih > ceiling) continue;
                     }
-                    else
+                    else if (pass == 0)
                     {
-                        // No reservation: check grid bounds + soft reserve
-                        if (maxY + ih > gridH) continue;
-                        if (pass == 0 && maxY + ih > reserveY) continue;
+                        ceiling = reserveY;
+                    }
+                    int maxAllowedY = (ceiling - ih < bestY) ? (ceiling - ih) : bestY;
+                    // Initial maxY==0 still needs the ceiling check — negative
+                    // maxAllowedY means ih exceeds the per-x ceiling.
+                    if (maxAllowedY < 0)
+                    {
+                        SUBPHASE_END(cand, ctx.profCyclesSkylineCandidate);
+                        continue;
                     }
 
-                    // Strictly worse Y never wins isBetter — skip before
-                    // waste + contact. Equal Y must fall through for the
-                    // combined-score and orientation tie-breaks.
-                    if (maxY > bestY) continue;
+                    int maxY         = 0;
+                    int areaUnder    = 0;
+                    int widthCovered = 0;
+                    bool aborted     = false;
 
-                    // Compute waste: gap area between skyline and item bottom
-                    waste        = 0;
-                    widthCovered = 0;
-                    for (size_t sj = si; sj < ctx.skyline.size() && widthCovered < iw; ++sj)
+                    for (size_t sj = si; sj < ctx.skyline.size(); ++sj)
                     {
+                        int segY = ctx.skyline[sj].y;
+                        if (segY > maxY)
+                        {
+                            maxY = segY;
+                            if (maxY > maxAllowedY)
+                            {
+                                aborted = true;
+                                break;
+                            }
+                        }
                         int segLeft      = ctx.skyline[sj].x;
                         int segRight     = segLeft + ctx.skyline[sj].width;
                         int overlapLeft  = (x > segLeft) ? x : segLeft;
                         int overlapRight = ((x + iw) < segRight) ? (x + iw) : segRight;
                         int overlapW     = overlapRight - overlapLeft;
                         if (overlapW <= 0) break;
-
-                        waste += overlapW * (maxY - ctx.skyline[sj].y);
+                        areaUnder += overlapW * segY;
                         widthCovered += overlapW;
+                        if (widthCovered >= iw) break;
                     }
 
-                    // Per-pair SharedBorder is bounded by edge_share +
-                    // FLUSH_BONUS; summed across edges with at most MAX_ADJ
-                    // unique neighbors the worst case is 2*(iw+ih) + MAX_ADJ.
-                    // If even that can't beat bestCombined at equal Y, skip.
-                    long long maxContact = 2LL * (iw + ih) + MAX_ADJ;
-                    if (maxY == bestY && (long long)waste * ctx.skylineWasteCoef - maxContact > bestCombined) continue;
+                    if (aborted || widthCovered < iw)
+                    {
+                        SUBPHASE_END(cand, ctx.profCyclesSkylineCandidate);
+                        continue;
+                    }
 
-                    // Contact scoring: adjacent same-type placements via
-                    // grid perimeter, then SharedBorder sum (corner filter
-                    // + flush bonus). Used at 1/4 value in waste tradeoff.
-                    // typeCount guard skips the 4 scans when no peer is
-                    // placed yet — subsumes curExactId < 0.
+                    int waste = maxY * iw - areaUnder;
+
+                    long long maxContact = 2LL * (iw + ih) + MAX_ADJ;
+                    if (maxY == bestY && (long long)waste * ctx.skylineWasteCoef - maxContact > bestCombined)
+                    {
+                        SUBPHASE_END(cand, ctx.profCyclesSkylineCandidate);
+                        continue;
+                    }
+                    SUBPHASE_END(cand, ctx.profCyclesSkylineCandidate);
+
+                    SUBPHASE_BEGIN(adj);
                     int adjPids[MAX_ADJ];
                     int numAdj = 0;
                     if (curExactId >= 0 && curExactId < 512 && ctx.typeCount[curExactId] > 0)
@@ -343,12 +342,6 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                     for (int k = 0; k < numAdj; ++k)
                         contact += SharedBorder(cand, ctx.placements[adjPids[k]]);
 
-                    // Best = lowest Y, then combined waste-contact score,
-                    // then prefer wide orientation.
-                    // Contact = SharedBorder sum. coef contact points offset
-                    // 1 waste cell. coef defaults to 3 (1/3 value); tunable
-                    // via SearchParams.skylineWasteCoef → ctx.skylineWasteCoef.
-                    // long long so (waste * coef) can't overflow int; bestCombined uses LLONG_MAX.
                     long long combined = (long long)waste * ctx.skylineWasteCoef - contact;
 
                     bool isBetter = (maxY < bestY) || (maxY == bestY && combined < bestCombined) ||
@@ -363,17 +356,20 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                         bestH        = ih;
                         bestRotated  = (ori != 0);
                     }
+                    SUBPHASE_END(adj, ctx.profCyclesSkylineAdjacency);
                 }
             }
         }
 
         if (bestX < 0)
         {
+            SUBPHASE_BEGIN(cmt);
             EmitBoundary(ctx, gridW, 0, 0, 0, 0);
-            continue; // Item doesn't fit
+            SUBPHASE_END(cmt, ctx.profCyclesSkylineCommit);
+            continue;
         }
 
-        // Place item
+        SUBPHASE_BEGIN(cmt);
         Placement p;
         p.id      = item.id;
         p.exactId = item.exactId;
@@ -385,7 +381,6 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         ctx.placements.push_back(p);
         if (p.exactId >= 0 && p.exactId < 512) ++ctx.typeCount[p.exactId];
 
-        // Fill placement ID grid for contact-point scoring
         {
             int pidx = (int)ctx.placements.size() - 1;
             for (int dy = 0; dy < bestH; ++dy)
@@ -393,8 +388,6 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                     ctx.placementIdGrid[(bestY + dy) * gridW + (bestX + dx)] = pidx;
         }
 
-        // Detect under-cliff waste: gaps between the item bottom (bestY)
-        // and the skyline segments it covers. These become secondary free rects.
         int placeLeft  = bestX;
         int placeRight = bestX + bestW;
         int placeTop   = bestY + bestH;
@@ -420,11 +413,6 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
             }
         }
 
-        // Update skyline: replace covered segments with one new segment at
-        // the top of the placed item, then re-add any partial segments at
-        // the edges.
-
-        // Rebuild skyline using ctx.skylineTmp as scratch
         ctx.skylineTmp.clear();
 
         for (size_t si = 0; si < ctx.skyline.size(); ++si)
@@ -457,7 +445,6 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
             }
         }
 
-        // Insert the placed item's top edge (maintain x-sorted order)
         SkylineNode itemSeg;
         itemSeg.x     = placeLeft;
         itemSeg.y     = placeTop;
@@ -468,7 +455,6 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
             ++insertPos;
         ctx.skylineTmp.insert(ctx.skylineTmp.begin() + insertPos, itemSeg);
 
-        // Merge adjacent segments with equal Y
         ctx.skyline.clear();
         for (size_t si = 0; si < ctx.skylineTmp.size(); ++si)
         {
@@ -484,6 +470,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         }
 
         EmitBoundary(ctx, gridW, bestX, bestY, bestW, bestH);
+        SUBPHASE_END(cmt, ctx.profCyclesSkylineCommit);
     }
 
     ctx.skylineSnapN     = (int)items.size();

@@ -1066,6 +1066,12 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         outDiag->gridHashProbes                  = diagGridHashProbes;
         outDiag->gridHashHits                    = diagGridHashHits;
         outDiag->profCyclesSkylinePrefix         = ctx.profSkylinePrefixCycles;
+        outDiag->profCyclesSkylineWasteMap       = ctx.profCyclesSkylineWasteMap;
+        outDiag->profCyclesSkylineCandidate      = ctx.profCyclesSkylineCandidate;
+        outDiag->profCyclesSkylineAdjacency      = ctx.profCyclesSkylineAdjacency;
+        outDiag->profCyclesSkylineCommit         = ctx.profCyclesSkylineCommit;
+        outDiag->profCyclesLerHistogram          = ctx.profCyclesLerHistogram;
+        outDiag->profCyclesLerStack              = ctx.profCyclesLerStack;
 #endif
     }
     return result;

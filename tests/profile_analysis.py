@@ -45,14 +45,20 @@ from loaders import load_csvs
 # All profile columns in emit order. Subset is detected per-CSV since a
 # non-profile build has none of them.
 INNER_LOOP_PHASES = [
-    ("fp_cycles_move_gen",         "MoveGen"),
-    ("fp_cycles_skyline_pack",     "SkylinePack"),
-    ("fp_cycles_ler",              "LER"),
-    ("fp_cycles_concentration",    "Concentration"),
-    ("fp_cycles_grouping",         "Grouping"),
-    ("fp_cycles_stranded",         "Stranded (post-fusion=0)"),
-    ("fp_cycles_score",            "Score"),
-    ("fp_cycles_accept",           "Accept"),
+    ("fp_cycles_move_gen",           "MoveGen"),
+    ("fp_cycles_skyline_pack",       "SkylinePack"),
+    ("fp_cycles_skyline_waste_map",  "  Skyline.WasteMap"),
+    ("fp_cycles_skyline_candidate",  "  Skyline.Candidate"),
+    ("fp_cycles_skyline_adjacency",  "  Skyline.Adjacency"),
+    ("fp_cycles_skyline_commit",     "  Skyline.Commit"),
+    ("fp_cycles_ler",                "LER"),
+    ("fp_cycles_ler_histogram",      "  LER.Histogram"),
+    ("fp_cycles_ler_stack",          "  LER.Stack"),
+    ("fp_cycles_concentration",      "Concentration"),
+    ("fp_cycles_grouping",           "Grouping"),
+    ("fp_cycles_stranded",           "Stranded (post-fusion=0)"),
+    ("fp_cycles_score",              "Score"),
+    ("fp_cycles_accept",             "Accept"),
 ]
 
 PER_RUN_PHASES = [
@@ -130,11 +136,15 @@ def emit_absolute_medians(out, df, available):
     for col, label in ALL_PHASES:
         if col not in available:
             continue
-        row = "| {} |".format(label)
+        medians = {}
         for cfg in configs:
             sub = df[df["config_name"] == cfg]
-            med = sub[col].median() if len(sub) else float("nan")
-            row += " {} |".format(_fmt_cycles(med))
+            medians[cfg] = sub[col].median() if len(sub) else float("nan")
+        if label.startswith("  ") and all(m == 0 for m in medians.values()):
+            continue
+        row = "| {} |".format(label)
+        for cfg in configs:
+            row += " {} |".format(_fmt_cycles(medians[cfg]))
         out.append(row)
     out.append("")
 
@@ -159,12 +169,18 @@ def emit_delta_vs_baseline(out, df, baseline, available):
     for col, label in ALL_PHASES:
         if col not in available:
             continue
-        row = "| {} |".format(label)
+        deltas = {}
+        base_ok = base_med.get(col, 0)
         for cfg in configs:
             sub = df[df["config_name"] == cfg]
             med = sub[col].median() if len(sub) else float("nan")
-            delta = med - base_med.get(col, float("nan"))
-            row += " {} |".format(_fmt_delta(delta))
+            deltas[cfg] = med - base_med.get(col, float("nan"))
+        if label.startswith("  ") and base_ok == 0 and all(
+                (d == 0 or pd.isna(d)) for d in deltas.values()):
+            continue
+        row = "| {} |".format(label)
+        for cfg in configs:
+            row += " {} |".format(_fmt_delta(deltas[cfg]))
         out.append(row)
     out.append("")
 
@@ -180,7 +196,10 @@ def emit_share_percent(out, df, available):
                "time is actually going in the hot path.")
     out.append("")
     configs = sorted(df["config_name"].unique())
-    inner_cols = [c for c, _ in INNER_LOOP_PHASES if c in available]
+    # Sub-phases (indented labels) are slices of their parent — exclude from
+    # the total so SkylinePack + Skyline.* don't double-count.
+    inner_cols = [c for c, lbl in INNER_LOOP_PHASES
+                  if c in available and not lbl.startswith("  ")]
     header = "| Phase | " + " | ".join(configs) + " |"
     out.append(header)
     out.append("|---" + "|---:" * len(configs) + "|")
@@ -189,13 +208,22 @@ def emit_share_percent(out, df, available):
         sub = df[df["config_name"] == cfg]
         config_totals[cfg] = sum(sub[col].median() for col in inner_cols
                                  if col in sub.columns)
+    subphase_skipped = False
     for col, label in INNER_LOOP_PHASES:
         if col not in available:
             continue
-        row = "| {} |".format(label)
+        medians = {}
         for cfg in configs:
             sub = df[df["config_name"] == cfg]
-            med = sub[col].median() if len(sub) else float("nan")
+            medians[cfg] = sub[col].median() if len(sub) else float("nan")
+        # Sub-phase rows only populate when STACKSORT_PROFILE_SUBPHASE=1; if
+        # every config reports zero the flag was off — skip to keep noise out.
+        if label.startswith("  ") and all(m == 0 for m in medians.values()):
+            subphase_skipped = True
+            continue
+        row = "| {} |".format(label)
+        for cfg in configs:
+            med = medians[cfg]
             total = config_totals.get(cfg, 0)
             if total > 0 and not pd.isna(med):
                 pct = 100.0 * med / total
@@ -204,6 +232,10 @@ def emit_share_percent(out, df, available):
                 row += " - |"
         out.append(row)
     out.append("")
+    if subphase_skipped:
+        out.append("_Sub-phase rows (indented) hidden — build with "
+                   "`STACKSORT_PROFILE_SUBPHASE=1` for per-candidate breakdown._")
+        out.append("")
 
     out.append("## Per-run phase medians (cycles per PackAnnealed call)")
     out.append("")

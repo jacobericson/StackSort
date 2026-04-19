@@ -261,6 +261,16 @@ class Packer
         // partial-recompute scheme could skip. Upper bound on Phase 3
         // savings.
         long long profCyclesSkylinePrefix;
+
+        // SkylinePack sub-phase breakdown (mirrors PackContext accumulators).
+        long long profCyclesSkylineWasteMap;
+        long long profCyclesSkylineCandidate;
+        long long profCyclesSkylineAdjacency;
+        long long profCyclesSkylineCommit;
+
+        // ComputeLERCtx sub-phase breakdown.
+        long long profCyclesLerHistogram;
+        long long profCyclesLerStack;
 #endif
 
         PackDiagnostics()
@@ -274,7 +284,9 @@ class Packer
               profCyclesGrouping(0), profCyclesStranded(0), profCyclesScore(0), profCyclesAccept(0),
               profCyclesPreReservation(0), profCyclesGreedySeed(0), profCyclesUnconstrainedFallback(0),
               profCyclesOptimizeGrouping(0), profCyclesBordersRaw(0), keptPrefixSum(0), keptPrefixCount(0),
-              gridHashProbes(0), gridHashHits(0), profCyclesSkylinePrefix(0)
+              gridHashProbes(0), gridHashHits(0), profCyclesSkylinePrefix(0), profCyclesSkylineWasteMap(0),
+              profCyclesSkylineCandidate(0), profCyclesSkylineAdjacency(0), profCyclesSkylineCommit(0),
+              profCyclesLerHistogram(0), profCyclesLerStack(0)
 #endif
         {
         }
@@ -426,6 +438,17 @@ class Packer
         // skip the measurement (cold seed / restart seed calls).
         int profSkylinePrefixK;
         long long profSkylinePrefixCycles;
+
+        // Sub-phase accumulators. SkylinePack and ComputeLERCtx stamp rdtsc
+        // around the labelled span and add to these; PackAnnealedH copies
+        // them into PackDiagnostics at run end. Help identify which inner
+        // component dominates total cycles so optimization can target it.
+        long long profCyclesSkylineWasteMap;  // waste-rect scan + placement
+        long long profCyclesSkylineCandidate; // segment walk (maxY + waste)
+        long long profCyclesSkylineAdjacency; // CollectAdjacentPids + SharedBorder
+        long long profCyclesSkylineCommit;    // place + waste-detect + skyline rebuild
+        long long profCyclesLerHistogram;     // per-row heights update
+        long long profCyclesLerStack;         // monotonic-stack sweep
 #endif
     };
 
