@@ -2,8 +2,11 @@
 // Format:
 //   # comments allowed anywhere after the first non-whitespace char
 //   grid W H
-//   w h type rotatable [name...]
-// First non-comment line must be the grid header.
+//   w h rotatable [exactId] [gameDataType] [itemFunction] [flagsMask] [customGroupId] [name...]
+// Tier columns are optional; trailing fields default to -1 ("skip tier") and
+// flagsMask defaults to 0. Missing exactId defaults to the item's own index
+// (unique = no grouping contribution). First non-comment line must be the
+// grid header.
 
 #include "Instance.h"
 
@@ -81,7 +84,7 @@ bool ParseInstanceFile(const std::string& filePath, Instance& out, std::string& 
         {
             Packer::Item item;
             int rotatable = 0;
-            if (!(iss >> item.w >> item.h >> item.itemTypeId >> rotatable))
+            if (!(iss >> item.w >> item.h >> rotatable))
             {
                 std::ostringstream ee;
                 ee << filePath << ":" << lineNum << ": malformed item line '" << cleaned << "'";
@@ -97,6 +100,18 @@ bool ParseInstanceFile(const std::string& filePath, Instance& out, std::string& 
                 errMsg = ee.str();
                 return false;
             }
+
+            // Optional tier columns. Once any read fails (non-numeric token,
+            // most likely the item name), the stream's failbit is sticky, so
+            // all remaining reads also fail and fall through to defaults.
+            if (!(iss >> item.exactId)) item.exactId = item.id;
+            if (!(iss >> item.gameDataType)) item.gameDataType = -1;
+            if (!(iss >> item.itemFunction)) item.itemFunction = -1;
+            int flagsInt = 0;
+            if (!(iss >> flagsInt)) flagsInt = 0;
+            item.flagsMask = (unsigned char)(flagsInt & 0xFF);
+            if (!(iss >> item.customGroupId)) item.customGroupId = -1;
+
             out.items.push_back(item);
         }
     }

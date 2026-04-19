@@ -28,7 +28,7 @@ static std::string BuildGridString(int gridW, int gridH, int reserveY, const Pac
     for (size_t i = 0; i < result.placements.size(); ++i)
     {
         const Packer::Placement& p = result.placements[i];
-        int typeId                 = items[p.id].itemTypeId;
+        int typeId                 = items[p.id].exactId;
         for (int dy = 0; dy < p.h; ++dy)
             for (int dx = 0; dx < p.w; ++dx)
                 grid[(p.y + dy) * gridW + (p.x + dx)] = typeId + 1;

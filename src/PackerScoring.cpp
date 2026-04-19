@@ -47,6 +47,8 @@ static long long applyGroupingPower(int b, int quarters)
     {
     case 4:
         return b; // b^1
+    case 5:
+        return (long long)b * isqrt(isqrt(b)); // b^1.25 — soft track
     case 6:
         return (long long)b * isqrt(b); // b^1.5 — DEFAULT, must match legacy bit-for-bit
     case 8:
@@ -60,6 +62,72 @@ static long long applyGroupingPower(int b, int quarters)
         bq *= b;
     long long root2 = isqrt_ll(bq);
     return isqrt_ll(root2);
+}
+
+// 0..100 multiplier on the function tier. -1 on either side disables; equal
+// returns 100; hardcoded cross-function pairs pull their value from ctx so
+// ablation can zero them.
+static int FunctionSimilarityPct(int funcA, int funcB, const Packer::PackContext& ctx)
+{
+    if (funcA < 0 || funcB < 0) return 0;
+    if (funcA == funcB) return 100;
+
+    int lo = funcA < funcB ? funcA : funcB;
+    int hi = funcA < funcB ? funcB : funcA;
+
+    if (lo == 3 && hi == 15) return ctx.funcSimFoodFoodRestricted;  // ITEM_FOOD ↔ ITEM_FOOD_RESTRICTED
+    if (lo == 1 && hi == 12) return ctx.funcSimFirstaidRobotrepair; // ITEM_FIRSTAID ↔ ITEM_ROBOTREPAIR
+
+    return 0;
+}
+
+// Max weight (0..100) across tiers where a and b match. Function tier is
+// pre-multiplied by FunctionSimilarityPct so partial cross-function matches
+// contribute less than same-function. Short-circuits on a 100-weight exact match.
+static int PairWeight(const Packer::Item& a, const Packer::Item& b, const Packer::PackContext& ctx)
+{
+    int best = 0;
+
+    if (a.exactId == b.exactId && a.exactId >= 0)
+    {
+        if (ctx.tierWeightExact >= 100) return ctx.tierWeightExact;
+        best = std::max(best, ctx.tierWeightExact);
+    }
+
+    if (a.customGroupId >= 0 && a.customGroupId == b.customGroupId) best = std::max(best, ctx.tierWeightCustom);
+
+    if (a.gameDataType >= 0 && a.gameDataType == b.gameDataType) best = std::max(best, ctx.tierWeightType);
+
+    int simPct = FunctionSimilarityPct(a.itemFunction, b.itemFunction, ctx);
+    if (simPct > 0)
+    {
+        int fnWeight = (ctx.tierWeightFunction * simPct + 50) / 100;
+        best         = std::max(best, fnWeight);
+    }
+
+    // Any shared flag bit triggers the tier — currently bit 0 (food_crop)
+    // and bit 1 (trade_item).
+    if ((a.flagsMask & b.flagsMask) != 0) best = std::max(best, ctx.tierWeightFlags);
+
+    return best;
+}
+
+void Packer::BuildPairWeightMatrix(PackContext& ctx, const std::vector<Item>& items)
+{
+    int n = (int)items.size();
+    // assign() overwrites in place when capacity >= n*n; InitPackContext
+    // reserved exactly that much, so this is a memset, not an allocation.
+    ctx.pairWeightMatrix.assign((size_t)n * (size_t)n, (unsigned char)0);
+    ctx.pairWeightMatrixN = n;
+    for (int i = 0; i < n; ++i)
+    {
+        for (int j = i + 1; j < n; ++j)
+        {
+            unsigned char w = (unsigned char)PairWeight(items[i], items[j], ctx);
+            ctx.pairWeightMatrix[(size_t)i * (size_t)n + (size_t)j] = w;
+            ctx.pairWeightMatrix[(size_t)j * (size_t)n + (size_t)i] = w;
+        }
+    }
 }
 
 // Scoring constants -- strict tier separation in ComputeScore.
@@ -429,136 +497,296 @@ void Packer::BuildAdjGraph(AdjGraph& g, const std::vector<Placement>& placements
 // Used by OptimizeGrouping's inner loop.
 
 long long Packer::ComputeGroupingBonusAdj(const std::vector<Placement>& placements, const std::vector<Item>& items,
-                                          const AdjGraph& g, int n, int groupingPowerQuarters)
+                                          const AdjGraph& g, int n, const PackContext& ctx, int groupingPowerQuarters)
 {
     if (n <= 1 || n > 256) return 0;
 
-    // Union-find: connect same-type items that share a border
-    int parent[256];
-    for (int i = 0; i < n; ++i)
-        parent[i] = i;
+    bool softActive              = ctx.softGroupingPct > 0;
+    const int matN               = ctx.pairWeightMatrixN;
+    const unsigned char* matBase = softActive && (matN > 0) ? &ctx.pairWeightMatrix[0] : (const unsigned char*)0;
 
-    // Iterate edges (each edge stored in both directions — only process i < j)
+    int parent[256];
+    int compBorders[256];
+    int softParent[256];
+    int softCompBorders[256];
     for (int i = 0; i < n; ++i)
     {
-        int typeA = items[placements[i].id].itemTypeId;
-        for (int k = 0; k < g.count[i]; ++k)
-        {
-            int j = g.adj[i][k].neighbor;
-            if (j <= i) continue; // avoid double-processing
-            if (items[placements[j].id].itemTypeId == typeA) uf_unite(parent, i, j);
-        }
+        parent[i]          = i;
+        compBorders[i]     = 0;
+        softParent[i]      = i;
+        softCompBorders[i] = 0;
     }
 
-    // Accumulate borders per connected component
-    int compBorders[256];
-    memset(compBorders, 0, n * sizeof(int));
-
     for (int i = 0; i < n; ++i)
     {
-        int typeA = items[placements[i].id].itemTypeId;
+        int idA = placements[i].id;
+        int exA = items[idA].exactId;
         for (int k = 0; k < g.count[i]; ++k)
         {
             int j = g.adj[i][k].neighbor;
             if (j <= i) continue;
-            if (items[placements[j].id].itemTypeId == typeA) compBorders[uf_find(parent, i)] += g.adj[i][k].border;
+            int idB = placements[j].id;
+            if (exA >= 0 && items[idB].exactId == exA)
+            {
+                uf_unite(parent, i, j);
+                compBorders[uf_find(parent, i)] += g.adj[i][k].border;
+            }
+            else if (softActive)
+            {
+                int w = matBase ? matBase[(size_t)idA * (size_t)matN + (size_t)idB]
+                                : PairWeight(items[idA], items[idB], ctx);
+                if (w <= 0) continue;
+                uf_unite(softParent, i, j);
+                softCompBorders[uf_find(softParent, i)] += g.adj[i][k].border * w;
+            }
         }
     }
 
-    long long total = 0;
+    for (int i = 0; i < n; ++i)
+    {
+        int root = uf_find(parent, i);
+        if (root != i && compBorders[i] > 0)
+        {
+            compBorders[root] += compBorders[i];
+            compBorders[i] = 0;
+        }
+    }
+
+    long long exactBonus = 0;
     for (int i = 0; i < n; ++i)
     {
         if (uf_find(parent, i) == i && compBorders[i] > 0)
-            total += applyGroupingPower(compBorders[i], groupingPowerQuarters);
+            exactBonus += applyGroupingPower(compBorders[i], groupingPowerQuarters);
     }
-    return total;
+
+    if (!softActive) return exactBonus;
+
+    for (int i = 0; i < n; ++i)
+    {
+        int root = uf_find(softParent, i);
+        if (root != i && softCompBorders[i] > 0)
+        {
+            softCompBorders[root] += softCompBorders[i];
+            softCompBorders[i] = 0;
+        }
+    }
+
+    long long softBonus = 0;
+    for (int i = 0; i < n; ++i)
+    {
+        if (uf_find(softParent, i) == i && softCompBorders[i] > 0)
+            softBonus += applyGroupingPower(softCompBorders[i] / 100, 5);
+    }
+    return exactBonus + softBonus * ctx.softGroupingPct / 100;
 }
 
 // O(n^2) version -- used by LAHC inner loop (no precomputed graph).
 
 long long Packer::ComputeGroupingBonus(const std::vector<Placement>& placements, const std::vector<Item>& items,
-                                       int groupingPowerQuarters)
+                                       const PackContext& ctx, int groupingPowerQuarters, long long* outExactOnly)
 {
     int n = (int)placements.size();
-    if (n <= 1 || n > 256) return 0;
+    if (n <= 1 || n > 256)
+    {
+        if (outExactOnly) *outExactOnly = 0;
+        return 0;
+    }
 
-    // Union-find: connect same-type items that share a qualifying border
+    bool softActive              = ctx.softGroupingPct > 0;
+    const int matN               = ctx.pairWeightMatrixN;
+    const unsigned char* matBase = softActive && (matN > 0) ? &ctx.pairWeightMatrix[0] : (const unsigned char*)0;
+
     int parent[256];
-    for (int i = 0; i < n; ++i)
-        parent[i] = i;
-
-    // Pass 1: build connected components
-    for (int i = 0; i < n; ++i)
-    {
-        int typeA = items[placements[i].id].itemTypeId;
-        for (int j = i + 1; j < n; ++j)
-        {
-            if (items[placements[j].id].itemTypeId != typeA) continue;
-            if (SharedBorder(placements[i], placements[j]) > 0) uf_unite(parent, i, j);
-        }
-    }
-
-    // Pass 2: accumulate borders per connected component
     int compBorders[256];
-    memset(compBorders, 0, n * sizeof(int));
-
+    int softParent[256];
+    int softCompBorders[256];
     for (int i = 0; i < n; ++i)
     {
-        int typeA = items[placements[i].id].itemTypeId;
-        for (int j = i + 1; j < n; ++j)
+        parent[i]          = i;
+        compBorders[i]     = 0;
+        softParent[i]      = i;
+        softCompBorders[i] = 0;
+    }
+
+    if (!softActive)
+    {
+        // Same-exactId pairs only can unite. Sort by exactId and enumerate
+        // within-run pairs; union order is irrelevant since downstream only
+        // consumes per-component totals (fixup + applyGroupingPower).
+        int exBuf[256];
+        int ixBuf[256];
+        int m = 0;
+        for (int i = 0; i < n; ++i)
         {
-            if (items[placements[j].id].itemTypeId != typeA) continue;
-            int shared = SharedBorder(placements[i], placements[j]);
-            if (shared > 0) compBorders[uf_find(parent, i)] += shared;
+            int ex = items[placements[i].id].exactId;
+            if (ex < 0) continue;
+            exBuf[m] = ex;
+            ixBuf[m] = i;
+            ++m;
+        }
+        for (int p = 1; p < m; ++p)
+        {
+            int keyEx = exBuf[p];
+            int keyIx = ixBuf[p];
+            int q     = p - 1;
+            while (q >= 0 && exBuf[q] > keyEx)
+            {
+                exBuf[q + 1] = exBuf[q];
+                ixBuf[q + 1] = ixBuf[q];
+                --q;
+            }
+            exBuf[q + 1] = keyEx;
+            ixBuf[q + 1] = keyIx;
+        }
+        int runStart = 0;
+        while (runStart < m)
+        {
+            int runEnd = runStart + 1;
+            while (runEnd < m && exBuf[runEnd] == exBuf[runStart])
+                ++runEnd;
+            for (int pi = runStart; pi < runEnd; ++pi)
+            {
+                int i = ixBuf[pi];
+                for (int pj = pi + 1; pj < runEnd; ++pj)
+                {
+                    int j      = ixBuf[pj];
+                    int shared = SharedBorder(placements[i], placements[j]);
+                    if (shared <= 0) continue;
+                    uf_unite(parent, i, j);
+                    compBorders[uf_find(parent, i)] += shared;
+                }
+            }
+            runStart = runEnd;
+        }
+    }
+    else
+    {
+        // Soft track active: every pair can contribute via PairWeight even
+        // without an exactId match, so we can't skip cross-bucket pairs.
+        for (int i = 0; i < n; ++i)
+        {
+            int idA = placements[i].id;
+            int exA = items[idA].exactId;
+            for (int j = i + 1; j < n; ++j)
+            {
+                int shared = SharedBorder(placements[i], placements[j]);
+                if (shared <= 0) continue;
+                int idB = placements[j].id;
+                if (exA >= 0 && items[idB].exactId == exA)
+                {
+                    uf_unite(parent, i, j);
+                    compBorders[uf_find(parent, i)] += shared;
+                }
+                else
+                {
+                    int w = matBase ? matBase[(size_t)idA * (size_t)matN + (size_t)idB]
+                                    : PairWeight(items[idA], items[idB], ctx);
+                    if (w <= 0) continue;
+                    uf_unite(softParent, i, j);
+                    softCompBorders[uf_find(softParent, i)] += shared * w;
+                }
+            }
         }
     }
 
-    // quarters=6 (default) hits applyGroupingPower's fast path (b * isqrt(b))
-    // so the legacy b^1.5 formula is preserved bit-for-bit.
-    long long total = 0;
+    // Fixup: collect borders scattered at intermediate roots to final roots.
+    for (int i = 0; i < n; ++i)
+    {
+        int root = uf_find(parent, i);
+        if (root != i && compBorders[i] > 0)
+        {
+            compBorders[root] += compBorders[i];
+            compBorders[i] = 0;
+        }
+    }
+
+    long long exactBonus = 0;
     for (int i = 0; i < n; ++i)
     {
         if (uf_find(parent, i) == i && compBorders[i] > 0)
-            total += applyGroupingPower(compBorders[i], groupingPowerQuarters);
+            exactBonus += applyGroupingPower(compBorders[i], groupingPowerQuarters);
     }
-    return total;
+
+    if (outExactOnly) *outExactOnly = exactBonus;
+    if (!softActive) return exactBonus;
+
+    for (int i = 0; i < n; ++i)
+    {
+        int root = uf_find(softParent, i);
+        if (root != i && softCompBorders[i] > 0)
+        {
+            softCompBorders[root] += softCompBorders[i];
+            softCompBorders[i] = 0;
+        }
+    }
+
+    long long softBonus = 0;
+    for (int i = 0; i < n; ++i)
+    {
+        if (uf_find(softParent, i) == i && softCompBorders[i] > 0)
+            softBonus += applyGroupingPower(softCompBorders[i] / 100, 5);
+    }
+    return exactBonus + softBonus * ctx.softGroupingPct / 100;
 }
 
-// Power-independent border total. Sums Σ b per component with no exponent
-// applied. Walks the same union-find structure as ComputeGroupingBonus —
-// fork rather than refactor since this is called once per final result and
-// the loops are tiny.
+// Power-independent border total. Sums weighted Σ b per component with no
+// exponent applied. Walks the same union-find structure as ComputeGroupingBonus
+// — fork rather than refactor since this is called once per final result.
 
-long long Packer::ComputeGroupingBordersRaw(const std::vector<Placement>& placements, const std::vector<Item>& items)
+long long Packer::ComputeGroupingBordersRaw(const std::vector<Placement>& placements, const std::vector<Item>& items,
+                                            const PackContext& ctx)
 {
     int n = (int)placements.size();
     if (n <= 1 || n > 256) return 0;
 
+    bool softActive              = ctx.softGroupingPct > 0;
+    const int matN               = ctx.pairWeightMatrixN;
+    const unsigned char* matBase = softActive && (matN > 0) ? &ctx.pairWeightMatrix[0] : (const unsigned char*)0;
+
     int parent[256];
+    int compBorders[256];
+    int softParent[256];
+    int softCompBorders[256];
     for (int i = 0; i < n; ++i)
-        parent[i] = i;
+    {
+        parent[i]          = i;
+        compBorders[i]     = 0;
+        softParent[i]      = i;
+        softCompBorders[i] = 0;
+    }
 
     for (int i = 0; i < n; ++i)
     {
-        int typeA = items[placements[i].id].itemTypeId;
+        int idA = placements[i].id;
+        int exA = items[idA].exactId;
         for (int j = i + 1; j < n; ++j)
         {
-            if (items[placements[j].id].itemTypeId != typeA) continue;
-            if (SharedBorder(placements[i], placements[j]) > 0) uf_unite(parent, i, j);
+            int shared = SharedBorder(placements[i], placements[j]);
+            if (shared <= 0) continue;
+            int idB = placements[j].id;
+            if (exA >= 0 && items[idB].exactId == exA)
+            {
+                uf_unite(parent, i, j);
+                compBorders[uf_find(parent, i)] += shared;
+            }
+            else if (softActive)
+            {
+                int w = matBase ? matBase[(size_t)idA * (size_t)matN + (size_t)idB]
+                                : PairWeight(items[idA], items[idB], ctx);
+                if (w <= 0) continue;
+                uf_unite(softParent, i, j);
+                softCompBorders[uf_find(softParent, i)] += shared * w;
+            }
         }
     }
 
-    int compBorders[256];
-    memset(compBorders, 0, n * sizeof(int));
-
     for (int i = 0; i < n; ++i)
     {
-        int typeA = items[placements[i].id].itemTypeId;
-        for (int j = i + 1; j < n; ++j)
+        int root = uf_find(parent, i);
+        if (root != i && compBorders[i] > 0)
         {
-            if (items[placements[j].id].itemTypeId != typeA) continue;
-            int shared = SharedBorder(placements[i], placements[j]);
-            if (shared > 0) compBorders[uf_find(parent, i)] += shared;
+            compBorders[root] += compBorders[i];
+            compBorders[i] = 0;
         }
     }
 
@@ -568,14 +796,31 @@ long long Packer::ComputeGroupingBordersRaw(const std::vector<Placement>& placem
         if (uf_find(parent, i) == i && compBorders[i] > 0) total += compBorders[i];
     }
 
-    return total;
+    if (!softActive) return total;
+
+    for (int i = 0; i < n; ++i)
+    {
+        int root = uf_find(softParent, i);
+        if (root != i && softCompBorders[i] > 0)
+        {
+            softCompBorders[root] += softCompBorders[i];
+            softCompBorders[i] = 0;
+        }
+    }
+
+    long long softTotal = 0;
+    for (int i = 0; i < n; ++i)
+    {
+        if (uf_find(softParent, i) == i && softCompBorders[i] > 0) softTotal += softCompBorders[i] / 100;
+    }
+    return total + softTotal * ctx.softGroupingPct / 100;
 }
 
 // Swap same-footprint items to improve clustering.
 // Physical layout unchanged since occupied cells are identical.
 
 void Packer::OptimizeGrouping(std::vector<Placement>& placements, const std::vector<Item>& items,
-                              int groupingPowerQuarters)
+                              const PackContext& ctx, int groupingPowerQuarters)
 {
     int n = (int)placements.size();
     if (n <= 1 || n > 256) return;
@@ -655,18 +900,18 @@ void Packer::OptimizeGrouping(std::vector<Placement>& placements, const std::vec
     while (improved)
     {
         improved              = false;
-        long long curGrouping = ComputeGroupingBonusAdj(placements, items, g, n, groupingPowerQuarters);
+        long long curGrouping = ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
 
         for (int ci = 0; ci < numCandidates; ++ci)
         {
             int pi = candidates[ci].i;
             int pj = candidates[ci].j;
 
-            // Skip if types now match (a prior swap made them same-type)
-            if (items[placements[pi].id].itemTypeId == items[placements[pj].id].itemTypeId) continue;
+            // Skip items of the same template — swap is a no-op for scoring.
+            if (items[placements[pi].id].exactId == items[placements[pj].id].exactId) continue;
 
             std::swap(placements[pi].id, placements[pj].id);
-            long long newGrouping = ComputeGroupingBonusAdj(placements, items, g, n, groupingPowerQuarters);
+            long long newGrouping = ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
 
             if (newGrouping > curGrouping)
             {

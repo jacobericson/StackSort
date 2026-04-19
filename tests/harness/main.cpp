@@ -257,7 +257,16 @@ static std::vector<std::string> BuildHeader()
     h.push_back("first_pass_repair_accepts");
     h.push_back("scoring_grouping_power_quarters");
     h.push_back("skyline_waste_coef");
+    h.push_back("tier_weight_exact");
+    h.push_back("tier_weight_custom");
+    h.push_back("tier_weight_type");
+    h.push_back("tier_weight_function");
+    h.push_back("tier_weight_flags");
+    h.push_back("function_sim_food_food_restricted");
+    h.push_back("function_sim_firstaid_robotrepair");
+    h.push_back("soft_grouping_pct");
     h.push_back("grouping_borders_raw");
+    h.push_back("grouping_bonus_exact");
     h.push_back("fp_skyline_snap_hits");
     h.push_back("fp_skyline_snap_probes");
 #ifdef STACKSORT_PROFILE
@@ -378,7 +387,7 @@ static int run(int argc, char** argv)
         int totalArea = 0;
         for (size_t k = 0; k < inst.items.size(); ++k)
         {
-            types.insert(inst.items[k].itemTypeId);
+            types.insert(inst.items[k].exactId);
             totalArea += inst.items[k].w * inst.items[k].h;
         }
         int numTypes   = (int)types.size();
@@ -553,7 +562,43 @@ static int run(int argc, char** argv)
                     (runParams.skylineWasteCoef >= 1) ? runParams.skylineWasteCoef : Packer::DEFAULT_SKYLINE_WASTE_COEF;
                 row.push_back(IntToStr(resolvedGPQ));
                 row.push_back(IntToStr(resolvedSWC));
+
+                // Resolved tier weights — sentinel -1 → compiled default; clamp to
+                // [0,100] so stamp columns mirror what PackerLAHC's resolver sees.
+                int rExact =
+                    (runParams.tierWeightExact >= 0) ? runParams.tierWeightExact : Packer::DEFAULT_TIER_WEIGHT_EXACT;
+                int rCustom =
+                    (runParams.tierWeightCustom >= 0) ? runParams.tierWeightCustom : Packer::DEFAULT_TIER_WEIGHT_CUSTOM;
+                int rType =
+                    (runParams.tierWeightType >= 0) ? runParams.tierWeightType : Packer::DEFAULT_TIER_WEIGHT_TYPE;
+                int rFunction = (runParams.tierWeightFunction >= 0) ? runParams.tierWeightFunction
+                                                                    : Packer::DEFAULT_TIER_WEIGHT_FUNCTION;
+                int rFlags =
+                    (runParams.tierWeightFlags >= 0) ? runParams.tierWeightFlags : Packer::DEFAULT_TIER_WEIGHT_FLAGS;
+                int rFsFfr = (runParams.funcSimFoodFoodRestricted >= 0) ? runParams.funcSimFoodFoodRestricted
+                                                                        : Packer::DEFAULT_FUNC_SIM_FOOD_FOOD_RESTRICTED;
+                int rFsFr = (runParams.funcSimFirstaidRobotrepair >= 0) ? runParams.funcSimFirstaidRobotrepair
+                                                                        : Packer::DEFAULT_FUNC_SIM_FIRSTAID_ROBOTREPAIR;
+                rExact    = std::min(rExact, 100);
+                rCustom   = std::min(rCustom, 100);
+                rType     = std::min(rType, 100);
+                rFunction = std::min(rFunction, 100);
+                rFlags    = std::min(rFlags, 100);
+                rFsFfr    = std::min(rFsFfr, 100);
+                rFsFr     = std::min(rFsFr, 100);
+                int rSoft =
+                    (runParams.softGroupingPct >= 0) ? runParams.softGroupingPct : Packer::DEFAULT_SOFT_GROUPING_PCT;
+                row.push_back(IntToStr(rExact));
+                row.push_back(IntToStr(rCustom));
+                row.push_back(IntToStr(rType));
+                row.push_back(IntToStr(rFunction));
+                row.push_back(IntToStr(rFlags));
+                row.push_back(IntToStr(rFsFfr));
+                row.push_back(IntToStr(rFsFr));
+                row.push_back(IntToStr(rSoft));
+
                 row.push_back(IntToStr(finalDiag.groupingBordersRaw));
+                row.push_back(IntToStr(finalDiag.groupingBonusExact));
                 row.push_back(IntToStr(firstDiag.skylineSnapHits));
                 row.push_back(IntToStr(firstDiag.skylineSnapProbes));
 #ifdef STACKSORT_PROFILE

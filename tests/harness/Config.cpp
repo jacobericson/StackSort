@@ -184,6 +184,38 @@ bool ParseConfigFile(const std::string& filePath, const Packer::SearchParams& ba
             {
                 if (!ParseInt(val, out.params.groupingPowerQuarters, errMsg, filePath, lineNum, key)) return false;
             }
+            else if (key == "tier_weight_exact")
+            {
+                if (!ParseInt(val, out.params.tierWeightExact, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "tier_weight_custom")
+            {
+                if (!ParseInt(val, out.params.tierWeightCustom, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "tier_weight_type")
+            {
+                if (!ParseInt(val, out.params.tierWeightType, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "tier_weight_function")
+            {
+                if (!ParseInt(val, out.params.tierWeightFunction, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "tier_weight_flags")
+            {
+                if (!ParseInt(val, out.params.tierWeightFlags, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "function_sim_food_food_restricted")
+            {
+                if (!ParseInt(val, out.params.funcSimFoodFoodRestricted, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "function_sim_firstaid_robotrepair")
+            {
+                if (!ParseInt(val, out.params.funcSimFirstaidRobotrepair, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "soft_grouping_pct")
+            {
+                if (!ParseInt(val, out.params.softGroupingPct, errMsg, filePath, lineNum, key)) return false;
+            }
         }
         else if (section == "skyline")
         {

@@ -1,28 +1,28 @@
 # 20x20_shop_stock_armour
 # cells=331 density=0.828 weight=213.93
 grid 20 20
-# w h type_id rotatable name
-7 1 132 0 Katana
-7 1 132 0 Katana
-7 1 132 0 Katana
-7 1 132 0 Katana
-10 1 15 0 Nodachi
-10 1 15 0 Nodachi
-10 1 15 0 Nodachi
-8 2 1 0 Foreign Sabre
-8 2 1 0 Foreign Sabre
-8 2 1 0 Foreign Sabre
-7 1 232 0 Iron Club
-7 1 232 0 Iron Club
-7 1 232 0 Iron Club
-4 2 238 0 Chainmail
-4 2 238 0 Chainmail
-4 2 238 0 Chainmail
-4 6 17 0 Plate Jacket
-4 6 17 0 Plate Jacket
-4 6 17 0 Plate Jacket
-4 6 45 0 Mercenary Plate
-4 6 45 0 Mercenary Plate
-4 5 7 0 Samurai Legplates
-4 5 7 0 Samurai Legplates
-4 5 7 0 Samurai Legplates
+# w h rotatable exactId gameDataType itemFunction flagsMask customGroupId name
+7 1 0 132 2 5 0 -1 Katana
+7 1 0 132 2 5 0 -1 Katana
+7 1 0 132 2 5 0 -1 Katana
+7 1 0 132 2 5 0 -1 Katana
+10 1 0 15 2 5 0 -1 Nodachi
+10 1 0 15 2 5 0 -1 Nodachi
+10 1 0 15 2 5 0 -1 Nodachi
+8 2 0 1 2 5 0 -1 Foreign Sabre
+8 2 0 1 2 5 0 -1 Foreign Sabre
+8 2 0 1 2 5 0 -1 Foreign Sabre
+7 1 0 232 2 5 0 -1 Iron Club
+7 1 0 232 2 5 0 -1 Iron Club
+7 1 0 232 2 5 0 -1 Iron Club
+4 2 0 238 3 6 0 -1 Chainmail
+4 2 0 238 3 6 0 -1 Chainmail
+4 2 0 238 3 6 0 -1 Chainmail
+4 6 0 17 3 6 0 -1 Plate Jacket
+4 6 0 17 3 6 0 -1 Plate Jacket
+4 6 0 17 3 6 0 -1 Plate Jacket
+4 6 0 45 3 6 0 -1 Mercenary Plate
+4 6 0 45 3 6 0 -1 Mercenary Plate
+4 5 0 7 3 6 0 -1 Samurai Legplates
+4 5 0 7 3 6 0 -1 Samurai Legplates
+4 5 0 7 3 6 0 -1 Samurai Legplates

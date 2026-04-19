@@ -37,13 +37,16 @@ static void EmitBoundary(Packer::PackContext& ctx, int gridW, int placeX, int pl
     ctx.skylineSnapBoundaries.push_back(b);
 }
 
-void Packer::CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>& /*items*/, int curType, int start,
+void Packer::CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>& /*items*/, int curExactId, int start,
                                  int step, int count, int* adjPids, int& numAdj, int maxAdj)
 {
+    // -1 means "no tier"; such items don't peer with each other (matches
+    // ComputeGroupingBonus's exA >= 0 test).
+    if (curExactId < 0) return;
     for (int i = 0; i < count; ++i)
     {
         int pidx = ctx.placementIdGrid[start + i * step];
-        if (pidx < 0 || ctx.placements[pidx].itemTypeId != curType) continue;
+        if (pidx < 0 || ctx.placements[pidx].exactId != curExactId) continue;
         bool dup = false;
         for (int k = 0; k < numAdj; ++k)
             if (adjPids[k] == pidx)
@@ -88,7 +91,18 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         ctx.skylineSnapWaste.clear();
         ctx.skylineSnapSkyline.clear();
         ctx.skylineSnapGridDelta.clear();
+        memset(ctx.typeCount, 0, sizeof(ctx.typeCount));
         EmitBoundary(ctx, gridW, 0, 0, 0, 0);
+    }
+    else
+    {
+        // Snap restore truncated placements[]; rebuild typeCount to match.
+        memset(ctx.typeCount, 0, sizeof(ctx.typeCount));
+        for (size_t i = 0; i < ctx.placements.size(); ++i)
+        {
+            int ex = ctx.placements[i].exactId;
+            if (ex >= 0 && ex < 512) ++ctx.typeCount[ex];
+        }
     }
 
 #ifdef STACKSORT_PROFILE
@@ -147,14 +161,15 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         {
             const Rect& wr = ctx.wasteRects[bestWasteIdx];
             Placement p;
-            p.id         = item.id;
-            p.itemTypeId = item.itemTypeId;
-            p.x          = wr.x;
-            p.y          = wr.y;
-            p.w          = wasteW;
-            p.h          = wasteH;
-            p.rotated    = wasteRotated;
+            p.id      = item.id;
+            p.exactId = item.exactId;
+            p.x       = wr.x;
+            p.y       = wr.y;
+            p.w       = wasteW;
+            p.h       = wasteH;
+            p.rotated = wasteRotated;
             ctx.placements.push_back(p);
+            if (p.exactId >= 0 && p.exactId < 512) ++ctx.typeCount[p.exactId];
 
             // Fill placement ID grid for contact-point scoring
             {
@@ -202,7 +217,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         int bestX              = -1;
         int bestW = 0, bestH = 0;
         bool bestRotated = false;
-        int curType      = items[idx].itemTypeId;
+        int curExactId   = items[idx].exactId;
 
         int numPasses = (reserveW > 0) ? 1 : 2;
 
@@ -265,6 +280,11 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                         if (pass == 0 && maxY + ih > reserveY) continue;
                     }
 
+                    // Strictly worse Y never wins isBetter — skip before
+                    // waste + contact. Equal Y must fall through for the
+                    // combined-score and orientation tie-breaks.
+                    if (maxY > bestY) continue;
+
                     // Compute waste: gap area between skyline and item bottom
                     waste        = 0;
                     widthCovered = 0;
@@ -281,23 +301,35 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                         widthCovered += overlapW;
                     }
 
-                    // Contact scoring: find adjacent same-type placements
-                    // via grid, then compute SharedBorder sum (corner filter
+                    // Per-pair SharedBorder is bounded by edge_share +
+                    // FLUSH_BONUS; summed across edges with at most MAX_ADJ
+                    // unique neighbors the worst case is 2*(iw+ih) + MAX_ADJ.
+                    // If even that can't beat bestCombined at equal Y, skip.
+                    long long maxContact = 2LL * (iw + ih) + MAX_ADJ;
+                    if (maxY == bestY && (long long)waste * ctx.skylineWasteCoef - maxContact > bestCombined) continue;
+
+                    // Contact scoring: adjacent same-type placements via
+                    // grid perimeter, then SharedBorder sum (corner filter
                     // + flush bonus). Used at 1/4 value in waste tradeoff.
+                    // typeCount guard skips the 4 scans when no peer is
+                    // placed yet — subsumes curExactId < 0.
                     int adjPids[MAX_ADJ];
                     int numAdj = 0;
-                    if (x > 0)
-                        CollectAdjacentPids(ctx, items, curType, maxY * gridW + (x - 1), gridW, ih, adjPids, numAdj,
-                                            MAX_ADJ);
-                    if (x + iw < gridW)
-                        CollectAdjacentPids(ctx, items, curType, maxY * gridW + (x + iw), gridW, ih, adjPids, numAdj,
-                                            MAX_ADJ);
-                    if (maxY > 0)
-                        CollectAdjacentPids(ctx, items, curType, (maxY - 1) * gridW + x, 1, iw, adjPids, numAdj,
-                                            MAX_ADJ);
-                    if (maxY + ih < gridH)
-                        CollectAdjacentPids(ctx, items, curType, (maxY + ih) * gridW + x, 1, iw, adjPids, numAdj,
-                                            MAX_ADJ);
+                    if (curExactId >= 0 && curExactId < 512 && ctx.typeCount[curExactId] > 0)
+                    {
+                        if (x > 0)
+                            CollectAdjacentPids(ctx, items, curExactId, maxY * gridW + (x - 1), gridW, ih, adjPids,
+                                                numAdj, MAX_ADJ);
+                        if (x + iw < gridW)
+                            CollectAdjacentPids(ctx, items, curExactId, maxY * gridW + (x + iw), gridW, ih, adjPids,
+                                                numAdj, MAX_ADJ);
+                        if (maxY > 0)
+                            CollectAdjacentPids(ctx, items, curExactId, (maxY - 1) * gridW + x, 1, iw, adjPids, numAdj,
+                                                MAX_ADJ);
+                        if (maxY + ih < gridH)
+                            CollectAdjacentPids(ctx, items, curExactId, (maxY + ih) * gridW + x, 1, iw, adjPids, numAdj,
+                                                MAX_ADJ);
+                    }
 
                     Placement cand;
                     cand.id      = item.id;
@@ -343,14 +375,15 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
 
         // Place item
         Placement p;
-        p.id         = item.id;
-        p.itemTypeId = item.itemTypeId;
-        p.x          = bestX;
-        p.y          = bestY;
-        p.w          = bestW;
-        p.h          = bestH;
-        p.rotated    = bestRotated;
+        p.id      = item.id;
+        p.exactId = item.exactId;
+        p.x       = bestX;
+        p.y       = bestY;
+        p.w       = bestW;
+        p.h       = bestH;
+        p.rotated = bestRotated;
         ctx.placements.push_back(p);
+        if (p.exactId >= 0 && p.exactId < 512) ++ctx.typeCount[p.exactId];
 
         // Fill placement ID grid for contact-point scoring
         {

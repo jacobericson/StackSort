@@ -1,19 +1,19 @@
 # 10x14_loot_run
 # cells=128 density=0.914 weight=40.00
 grid 10 14
-# w h type_id rotatable name
-6 3 113 0 Building Material
-6 3 113 0 Building Material
-4 3 112 0 Iron Plates
-4 3 112 0 Iron Plates
-3 3 25 0 Armour Plating
-3 3 25 0 Armour Plating
-3 2 37 0 Fabrics
-3 2 37 0 Fabrics
-3 2 37 0 Fabrics
-3 2 114 0 Raw Iron
-6 1 35 0 Steel Bars
-3 2 12 0 Skeleton Repair Kit
-3 2 21 0 Electrical Components
-2 2 110 0 Ration Pack
-2 2 8 0 Standard First Aid Kit
+# w h rotatable exactId gameDataType itemFunction flagsMask customGroupId name
+6 3 0 113 -1 -1 2 -1 Building Material
+6 3 0 113 -1 -1 2 -1 Building Material
+4 3 0 112 -1 -1 2 -1 Iron Plates
+4 3 0 112 -1 -1 2 -1 Iron Plates
+3 3 0 25 -1 -1 2 -1 Armour Plating
+3 3 0 25 -1 -1 2 -1 Armour Plating
+3 2 0 37 -1 -1 2 -1 Fabrics
+3 2 0 37 -1 -1 2 -1 Fabrics
+3 2 0 37 -1 -1 2 -1 Fabrics
+3 2 0 114 -1 -1 2 -1 Raw Iron
+6 1 0 35 -1 -1 2 -1 Steel Bars
+3 2 0 12 -1 12 2 -1 Skeleton Repair Kit
+3 2 0 21 -1 -1 2 -1 Electrical Components
+2 2 0 110 -1 3 2 -1 Ration Pack
+2 2 0 8 -1 1 2 -1 Standard First Aid Kit

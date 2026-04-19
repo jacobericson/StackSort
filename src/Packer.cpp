@@ -15,9 +15,9 @@ struct ItemSortCompare
         int areaA = a.w * a.h;
         int areaB = b.w * b.h;
         if (areaA != areaB) return areaA > areaB;
-        // Tertiary: group same-type items together in packing order.
+        // Tertiary: group same-template items together in packing order.
         // Items placed consecutively tend to end up adjacent on the grid.
-        return a.itemTypeId < b.itemTypeId;
+        return a.exactId < b.exactId;
     }
 };
 
@@ -48,15 +48,28 @@ void Packer::InitPackContext(PackContext& ctx, int gridW, int gridH, int numItem
     ctx.bssfPl.reserve(numItems);
     ctx.seedPl.reserve(numItems);
     ctx.bestPl.reserve(numItems);
-    ctx.skylineWasteCoef = DEFAULT_SKYLINE_WASTE_COEF;
-    ctx.gridCacheCount   = 0;
-    ctx.gridCacheHead    = 0;
+    ctx.skylineWasteCoef           = DEFAULT_SKYLINE_WASTE_COEF;
+    ctx.tierWeightExact            = DEFAULT_TIER_WEIGHT_EXACT;
+    ctx.tierWeightCustom           = DEFAULT_TIER_WEIGHT_CUSTOM;
+    ctx.tierWeightType             = DEFAULT_TIER_WEIGHT_TYPE;
+    ctx.tierWeightFunction         = DEFAULT_TIER_WEIGHT_FUNCTION;
+    ctx.tierWeightFlags            = DEFAULT_TIER_WEIGHT_FLAGS;
+    ctx.funcSimFoodFoodRestricted  = DEFAULT_FUNC_SIM_FOOD_FOOD_RESTRICTED;
+    ctx.funcSimFirstaidRobotrepair = DEFAULT_FUNC_SIM_FIRSTAID_ROBOTREPAIR;
+    ctx.softGroupingPct            = DEFAULT_SOFT_GROUPING_PCT;
+    // Reserve capacity up front so BuildPairWeightMatrix's assign() doesn't
+    // reallocate inside the per-pack critical path.
+    ctx.pairWeightMatrix.reserve((size_t)numItems * (size_t)numItems);
+    ctx.pairWeightMatrixN = 0;
+    ctx.gridCacheCount    = 0;
+    ctx.gridCacheHead     = 0;
     ctx.skylineSnapBoundaries.reserve((size_t)numItems + 1);
     ctx.skylineSnapWaste.reserve((size_t)numItems * 30);
     ctx.skylineSnapSkyline.reserve((size_t)numItems * 20);
     ctx.skylineSnapGridDelta.reserve((size_t)totalCells);
     ctx.skylineSnapN     = 0;
     ctx.skylineSnapValid = false;
+    memset(ctx.typeCount, 0, sizeof(ctx.typeCount));
 #ifdef STACKSORT_PROFILE
     ctx.profSkylinePrefixK      = 0;
     ctx.profSkylinePrefixCycles = 0;
@@ -157,7 +170,7 @@ Packer::Result Packer::PackH(int gridW, int gridH, const std::vector<Item>& item
 
     // Score — PackH has no SearchParams plumbing, so use compile-time defaults.
     int numRot           = CountRotated(result.placements);
-    long long grouping   = ComputeGroupingBonus(result.placements, items, Packer::DEFAULT_GROUPING_POWER_QUARTERS);
+    long long grouping   = ComputeGroupingBonus(result.placements, items, ctx, Packer::DEFAULT_GROUPING_POWER_QUARTERS);
     result.groupingBonus = grouping;
     result.score =
         ComputeScore(result.placements.size(), result.lerArea, result.lerHeight, result.concentration, target, numRot,

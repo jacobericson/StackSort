@@ -1,0 +1,54 @@
+# 20x20_skeleton_workshop
+# cells=337 density=0.843 weight=161.32
+grid 20 20
+# w h rotatable exactId gameDataType itemFunction flagsMask customGroupId name
+3 2 0 12 -1 12 2 -1 Skeleton Repair Kit
+3 2 0 12 -1 12 2 -1 Skeleton Repair Kit
+3 2 0 12 -1 12 2 -1 Skeleton Repair Kit
+3 2 0 12 -1 12 2 -1 Skeleton Repair Kit
+3 2 0 12 -1 12 2 -1 Skeleton Repair Kit
+3 2 0 12 -1 12 2 -1 Skeleton Repair Kit
+3 2 0 12 -1 12 2 -1 Skeleton Repair Kit
+3 2 0 13 -1 12 2 -1 Authentic Skeleton Repair Kit
+3 2 0 13 -1 12 2 -1 Authentic Skeleton Repair Kit
+3 2 0 13 -1 12 2 -1 Authentic Skeleton Repair Kit
+3 2 0 13 -1 12 2 -1 Authentic Skeleton Repair Kit
+3 2 0 13 -1 12 2 -1 Authentic Skeleton Repair Kit
+2 1 0 11 -1 1 2 -1 Basic First Aid Kit
+2 1 0 11 -1 1 2 -1 Basic First Aid Kit
+2 1 0 11 -1 1 2 -1 Basic First Aid Kit
+2 1 0 11 -1 1 2 -1 Basic First Aid Kit
+2 1 0 11 -1 1 2 -1 Basic First Aid Kit
+2 2 0 8 -1 1 2 -1 Standard First Aid Kit
+2 2 0 8 -1 1 2 -1 Standard First Aid Kit
+2 2 0 8 -1 1 2 -1 Standard First Aid Kit
+3 2 0 14 -1 1 2 -1 Advanced First Aid Kit
+3 2 0 14 -1 1 2 -1 Advanced First Aid Kit
+3 2 0 14 -1 1 2 -1 Advanced First Aid Kit
+2 2 0 158 -1 2 2 -1 Splint Kit
+2 2 0 158 -1 2 2 -1 Splint Kit
+2 7 0 102 111 -1 0 -1 Scout Leg (right)
+2 7 0 100 111 -1 0 -1 Skeleton Leg (left)
+2 7 0 104 111 -1 0 -1 Economy Leg (right)
+2 6 0 108 111 -1 0 -1 Skeleton Arm (left)
+2 6 0 106 111 -1 0 -1 Economy Arm (right)
+2 6 0 220 111 -1 0 -1 Industrial Lifter Arm (right)
+7 1 0 132 2 5 0 -1 Katana
+7 1 0 132 2 5 0 -1 Katana
+7 1 0 132 2 5 0 -1 Katana
+7 1 0 0 2 5 0 -1 Guardless Katana
+7 1 0 0 2 5 0 -1 Guardless Katana
+6 1 0 196 2 5 0 -1 Wakizashi
+6 1 0 196 2 5 0 -1 Wakizashi
+6 1 0 196 2 5 0 -1 Wakizashi
+7 1 0 215 2 5 0 -1 Jitte
+7 1 0 215 2 5 0 -1 Jitte
+3 2 0 19 -1 9 2 -1 Tools
+3 2 0 19 -1 9 2 -1 Tools
+4 2 0 182 -1 -1 2 -1 Robotics Components
+4 2 0 182 -1 -1 2 -1 Robotics Components
+2 4 0 29 -1 9 2 -1 Hacksaw
+2 4 0 29 -1 9 2 -1 Hacksaw
+4 3 0 27 -1 10 2 -1 Medical Supplies
+4 3 0 27 -1 10 2 -1 Medical Supplies
+4 1 0 146 -1 16 0 -1 Bolts [Regulars]

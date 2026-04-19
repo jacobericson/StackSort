@@ -189,11 +189,16 @@ void StackSortUI::ApplySort(InventoryGUI* gui, int target, int& outAppliedLerSid
             if (!si.item) continue;
 
             Packer::Item pi;
-            pi.id         = (int)packItems.size();
-            pi.w          = si.item->itemWidth;
-            pi.h          = si.item->itemHeight;
-            pi.canRotate  = StackSort_CanRotate(si.item);
-            pi.itemTypeId = 0; // sync fallback: no grouping data
+            pi.id        = (int)packItems.size();
+            pi.w         = si.item->itemWidth;
+            pi.h         = si.item->itemHeight;
+            pi.canRotate = StackSort_CanRotate(si.item);
+            // Sync fallback has no tier data; -1 on every tier disables grouping.
+            pi.exactId       = -1;
+            pi.customGroupId = -1;
+            pi.gameDataType  = -1;
+            pi.itemFunction  = -1;
+            pi.flagsMask     = 0;
             packItems.push_back(pi);
             itemPtrs.push_back(si.item);
         }
@@ -404,13 +409,13 @@ bool StackSortUI::RevertInventory(InventoryGUI* gui)
                 if (!matched[j] && currentPtrs[j] == op.item)
                 {
                     Packer::Placement p;
-                    p.id         = (int)itemPtrs.size();
-                    p.itemTypeId = 0;
-                    p.x          = op.x;
-                    p.y          = op.y;
-                    p.w          = op.w;
-                    p.h          = op.h;
-                    p.rotated    = false;
+                    p.id      = (int)itemPtrs.size();
+                    p.exactId = -1;
+                    p.x       = op.x;
+                    p.y       = op.y;
+                    p.w       = op.w;
+                    p.h       = op.h;
+                    p.rotated = false;
                     result.placements.push_back(p);
                     itemPtrs.push_back(op.item);
                     matched[j] = true;

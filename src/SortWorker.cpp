@@ -1,5 +1,6 @@
 #pragma warning(push)
 #pragma warning(disable : 4091)
+#include <kenshi/GameData.h>
 #include <kenshi/Inventory.h>
 #include <kenshi/gui/InventoryGUI.h>
 #pragma warning(pop)
@@ -123,13 +124,25 @@ void SortWorker::ScanInventory(int trackIdx, Inventory* inv, bool* outNeedsCompu
         std::vector<Packer::Item> packItems;
         std::vector<Item*> itemPtrs;
 
-        std::map<GameData*, int> typeIdMap;
-        int nextTypeId = 0;
+        // GameData pointer dedup — same template → same exactId. Other tier
+        // fields read off the template directly; no cache needed.
+        std::map<GameData*, int> exactIdMap;
+        int nextExactId = 0;
+
+        // GameData::bdata is a boost::unordered_map with a custom Ogre
+        // allocator. C++03 has no `auto`, so the map type must be spelled
+        // out to call .find(). Pattern copied from CatalogDump.cpp:199.
+        typedef boost::unordered::unordered_map<
+            std::string, bool, boost::hash<std::string>, std::equal_to<std::string>,
+            Ogre::STLAllocator<std::pair<std::string const, bool>, Ogre::GeneralAllocPolicy> >
+            BdataMap;
 
         for (size_t i = 0; i < sectionItems.size(); ++i)
         {
             const InventorySection::SectionItem& si = sectionItems[i];
             if (!si.item) continue;
+
+            GameData* gd = si.item->data;
 
             Packer::Item pi;
             pi.id        = (int)packItems.size();
@@ -137,16 +150,52 @@ void SortWorker::ScanInventory(int trackIdx, Inventory* inv, bool* outNeedsCompu
             pi.h         = si.item->itemHeight;
             pi.canRotate = StackSort_CanRotate(si.item);
 
-            GameData* gd                              = si.item->data;
-            std::map<GameData*, int>::iterator typeIt = typeIdMap.find(gd);
-            if (typeIt == typeIdMap.end())
+            if (gd)
             {
-                typeIdMap[gd] = nextTypeId;
-                pi.itemTypeId = nextTypeId++;
+                std::map<GameData*, int>::iterator it = exactIdMap.find(gd);
+                if (it == exactIdMap.end())
+                {
+                    exactIdMap[gd] = nextExactId;
+                    pi.exactId     = nextExactId++;
+                }
+                else
+                {
+                    pi.exactId = it->second;
+                }
             }
             else
             {
-                pi.itemTypeId = typeIt->second;
+                pi.exactId = -1;
+            }
+
+            // Custom groups (tier 2) are not wired yet — config-file loader
+            // is a follow-on. -1 keeps the tier disabled in PairWeight.
+            pi.customGroupId = -1;
+
+            // gameDataType: generic ITEM (enum 4) is too broad to cluster on
+            // — treat it as no-data so the tier skips.
+            if (gd)
+            {
+                int t           = (int)gd->type;
+                pi.gameDataType = (t == (int)ITEM) ? -1 : t;
+            }
+            else
+            {
+                pi.gameDataType = -1;
+            }
+
+            // itemFunction: ITEM_NO_FUNCTION (enum 0) means "no declared role"
+            // — skip the tier rather than cluster every unclassified item.
+            int fn          = (int)si.item->itemFunction;
+            pi.itemFunction = (fn == 0) ? -1 : fn;
+
+            pi.flagsMask = 0;
+            if (gd)
+            {
+                BdataMap::const_iterator fc = gd->bdata.find("food crop");
+                if (fc != gd->bdata.end() && fc->second) pi.flagsMask |= 1;
+                BdataMap::const_iterator ti = gd->bdata.find("trade item");
+                if (ti != gd->bdata.end() && ti->second) pi.flagsMask |= 2;
             }
 
             packItems.push_back(pi);

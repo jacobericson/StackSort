@@ -1,39 +1,39 @@
 # 20x20_farming_stockpile
 # cells=358 density=0.895 weight=68.50
 grid 20 20
-# w h type_id rotatable name
-5 5 26 0 Wheatstraw
-5 5 26 0 Wheatstraw
-5 5 26 0 Wheatstraw
-5 5 26 0 Wheatstraw
-5 5 26 0 Wheatstraw
-3 1 130 0 Cactus
-3 1 130 0 Cactus
-3 1 130 0 Cactus
-3 1 130 0 Cactus
-3 3 122 0 Greenfruit
-3 3 122 0 Greenfruit
-3 3 122 0 Greenfruit
-3 3 122 0 Greenfruit
-3 3 122 0 Greenfruit
-5 5 41 0 Water
-5 5 41 0 Water
-5 5 41 0 Water
-5 5 41 0 Water
-2 2 184 0 Foul Raw Meat
-2 2 184 0 Foul Raw Meat
-2 2 184 0 Foul Raw Meat
-2 2 184 0 Foul Raw Meat
-2 2 184 0 Foul Raw Meat
-2 2 203 0 Dried Meat
-2 2 203 0 Dried Meat
-2 2 203 0 Dried Meat
-2 2 203 0 Dried Meat
-2 2 203 0 Dried Meat
-2 2 203 0 Dried Meat
-2 2 203 0 Dried Meat
-2 2 203 0 Dried Meat
-3 2 34 0 Foodcube
-3 2 34 0 Foodcube
-3 2 34 0 Foodcube
-3 2 34 0 Foodcube
+# w h rotatable exactId gameDataType itemFunction flagsMask customGroupId name
+5 5 0 26 -1 -1 3 -1 Wheatstraw
+5 5 0 26 -1 -1 3 -1 Wheatstraw
+5 5 0 26 -1 -1 3 -1 Wheatstraw
+5 5 0 26 -1 -1 3 -1 Wheatstraw
+5 5 0 26 -1 -1 3 -1 Wheatstraw
+3 1 0 130 -1 -1 3 -1 Cactus
+3 1 0 130 -1 -1 3 -1 Cactus
+3 1 0 130 -1 -1 3 -1 Cactus
+3 1 0 130 -1 -1 3 -1 Cactus
+3 3 0 122 -1 -1 3 -1 Greenfruit
+3 3 0 122 -1 -1 3 -1 Greenfruit
+3 3 0 122 -1 -1 3 -1 Greenfruit
+3 3 0 122 -1 -1 3 -1 Greenfruit
+3 3 0 122 -1 -1 3 -1 Greenfruit
+5 5 0 41 -1 -1 3 -1 Water
+5 5 0 41 -1 -1 3 -1 Water
+5 5 0 41 -1 -1 3 -1 Water
+5 5 0 41 -1 -1 3 -1 Water
+2 2 0 184 -1 15 2 -1 Foul Raw Meat
+2 2 0 184 -1 15 2 -1 Foul Raw Meat
+2 2 0 184 -1 15 2 -1 Foul Raw Meat
+2 2 0 184 -1 15 2 -1 Foul Raw Meat
+2 2 0 184 -1 15 2 -1 Foul Raw Meat
+2 2 0 203 -1 3 2 -1 Dried Meat
+2 2 0 203 -1 3 2 -1 Dried Meat
+2 2 0 203 -1 3 2 -1 Dried Meat
+2 2 0 203 -1 3 2 -1 Dried Meat
+2 2 0 203 -1 3 2 -1 Dried Meat
+2 2 0 203 -1 3 2 -1 Dried Meat
+2 2 0 203 -1 3 2 -1 Dried Meat
+2 2 0 203 -1 3 2 -1 Dried Meat
+3 2 0 34 -1 3 2 -1 Foodcube
+3 2 0 34 -1 3 2 -1 Foodcube
+3 2 0 34 -1 3 2 -1 Foodcube
+3 2 0 34 -1 3 2 -1 Foodcube

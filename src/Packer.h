@@ -21,7 +21,13 @@ class Packer
         int w;
         int h;
         bool canRotate; // packer may try (h, w) orientation
-        int itemTypeId; // items with same typeId are grouped during scoring
+
+        // Grouping tier identifiers. -1 on any field = skip this tier on pair match.
+        int exactId;             // same GameData pointer → same id
+        int customGroupId;       // config-driven; -1 when unassigned
+        int gameDataType;        // itemType enum int; -1 when == generic ITEM
+        int itemFunction;        // ItemFunction enum int; -1 when == ITEM_NO_FUNCTION
+        unsigned char flagsMask; // bit 0 = food_crop, bit 1 = trade_item
     };
 
     struct Placement
@@ -32,12 +38,13 @@ class Packer
         int w;
         int h;
         bool rotated; // true if packer swapped w/h relative to input
-        // CollectAdjacentPids cannot use items[p.id].itemTypeId for the
-        // type compare: SkylinePack receives a permuted `items` vector
-        // (curOrder), so items[p.id] is the item at position p.id in the
-        // current ordering, not the item with id == p.id. Carry the type
-        // in Placement instead.
-        int itemTypeId;
+        // SkylinePack receives a permuted `items` vector (curOrder), so
+        // items[p.id].exactId is the item at position p.id in the current
+        // ordering, not the item with id == p.id. Carry the exact id on
+        // Placement so CollectAdjacentPids can compare directly. No other
+        // tier ids here: skyline tiebreaker stays exact-only; richer tier
+        // matching runs only in the final scorer.
+        int exactId;
     };
 
     struct Result
@@ -86,6 +93,30 @@ class Packer
     // 6 = b^1.5 (matches legacy formula via fast-path), 7 = b^1.75, 8 = b^2.
     static const int DEFAULT_GROUPING_POWER_QUARTERS = 6;
 
+    // Tier weights (fixed-point percent, 0..100). PairWeight takes the max
+    // across matching tiers; weight 0 disables that tier. When all non-exact
+    // weights are 0, scoring is bit-equivalent to the pre-tier scheme.
+    static const int DEFAULT_TIER_WEIGHT_EXACT    = 100;
+    static const int DEFAULT_TIER_WEIGHT_CUSTOM   = 70;
+    static const int DEFAULT_TIER_WEIGHT_TYPE     = 50;
+    static const int DEFAULT_TIER_WEIGHT_FUNCTION = 40;
+    static const int DEFAULT_TIER_WEIGHT_FLAGS    = 10;
+
+    // Partial-similarity multipliers applied to the function tier for
+    // specific cross-function pairs (symmetric). 100 = full match; 0 disables.
+    static const int DEFAULT_FUNC_SIM_FOOD_FOOD_RESTRICTED = 50;
+    static const int DEFAULT_FUNC_SIM_FIRSTAID_ROBOTREPAIR = 50;
+
+    // Soft-grouping bonus scale, in percent. The grouping scorer is split
+    // into two tracks: (1) an exact-match track that preserves legacy
+    // superadditive b^1.5 clustering via union-find on exactId, and (2) a
+    // soft track that clusters non-exact tier-matched pairs via a separate
+    // union-find with b^(5/4) power. Soft contribution per component is
+    //   applyGroupingPower(compBorders, 5) * SOFT_GROUPING_PCT / 100
+    // A value of 0 disables the soft track entirely, giving
+    // bit-equivalence with legacy scoring.
+    static const int DEFAULT_SOFT_GROUPING_PCT = 50;
+
     // Tunable LAHC search parameters. NULL = use compiled defaults.
     // Default constructor leaves all fields at sentinels so callers can
     // default-construct and override only the fields they care about.
@@ -125,11 +156,30 @@ class Packer
         // Resolver enforces >= 1 (0 would chase contact at the cost of waste).
         int skylineWasteCoef;
 
+        // Grouping tier weights (0..100 percent). -1 = compiled default.
+        // 0 disables that tier. Resolver clamps values above 100.
+        int tierWeightExact;
+        int tierWeightCustom;
+        int tierWeightType;
+        int tierWeightFunction;
+        int tierWeightFlags;
+
+        // Function-similarity overrides (0..100 percent, symmetric).
+        // -1 = compiled default. 0 disables the specific cross-function pair.
+        int funcSimFoodFoodRestricted;
+        int funcSimFirstaidRobotrepair;
+
+        // Soft-grouping scale (0..100 percent). -1 = compiled default.
+        // 0 disables the soft track; exact-match behavior is unchanged.
+        int softGroupingPct;
+
         SearchParams()
             : numRestarts(-1), itersPerRestart(-1), lahcHistoryLen(-1), plateauThreshold(-1), rngSeed(0),
               enableBafSeed(-1), enableUnconstrainedFallback(-1), enableOptimizeGrouping(-1), enableFastConverge(-1),
               enableRepairMove(-1), enablePreReservation(-1), moveSwapMax(-1), moveInsertMax(-1), moveRotateMax(-1),
-              scoringGroupingWeight(-1), scoringFragWeight(-1), groupingPowerQuarters(-1), skylineWasteCoef(-1)
+              scoringGroupingWeight(-1), scoringFragWeight(-1), groupingPowerQuarters(-1), skylineWasteCoef(-1),
+              tierWeightExact(-1), tierWeightCustom(-1), tierWeightType(-1), tierWeightFunction(-1),
+              tierWeightFlags(-1), funcSimFoodFoodRestricted(-1), funcSimFirstaidRobotrepair(-1), softGroupingPct(-1)
         {
         }
 
@@ -168,6 +218,11 @@ class Packer
         // harness uses this for cross-power heatmap comparisons since
         // groupingBonus's scale changes with groupingPowerQuarters.
         long long groupingBordersRaw;
+
+        // Exact-track contribution to groupingBonus (b^1.5 over exactId-matched
+        // components only, no soft-track addition). groupingBonus - this =
+        // linear soft contribution. Diagnostic so tuning can see the split.
+        long long groupingBonusExact;
 
         int skylineSnapHits;
         int skylineSnapProbes;
@@ -211,8 +266,8 @@ class Packer
         PackDiagnostics()
             : bestFoundIter(0), bestFoundRestart(0), plateauBreaks(0), lahcItersExecuted(0), packCalls(0),
               unconstrainedFallbackWon(false), greedySeedScore(0), greedySeedLerArea(0), repairMoveRolls(0),
-              repairMoveScans(0), repairMoveHits(0), repairMoveAccepts(0), groupingBordersRaw(0), skylineSnapHits(0),
-              skylineSnapProbes(0)
+              repairMoveScans(0), repairMoveHits(0), repairMoveAccepts(0), groupingBordersRaw(0), groupingBonusExact(0),
+              skylineSnapHits(0), skylineSnapProbes(0)
 #ifdef STACKSORT_PROFILE
               ,
               profCyclesMoveGen(0), profCyclesSkylinePack(0), profCyclesLer(0), profCyclesConcentration(0),
@@ -313,6 +368,11 @@ class Packer
         std::vector<Rect> wasteRects;            // Skyline waste map (under-cliff gaps)
         std::vector<int> placementIdGrid;        // SkylinePack: placement index per cell (-1 = empty)
 
+        // Per-exactId placement count. 512 cap is a soft limit — exactIds at
+        // or above fall back to full scan (correctness preserved; corpora
+        // stay well under).
+        int typeCount[512];
+
         // LAHC scratch: greedy-seed and best-so-far placements.
         std::vector<Placement> bssfPl;
         std::vector<Placement> seedPl;
@@ -322,6 +382,25 @@ class Packer
         // PackAnnealedH/PackH before calling SkylinePack so the inner loop
         // doesn't take an extra parameter.
         int skylineWasteCoef;
+
+        // Grouping tier weights (0..100). Read by PairWeight in the final scorer.
+        int tierWeightExact;
+        int tierWeightCustom;
+        int tierWeightType;
+        int tierWeightFunction;
+        int tierWeightFlags;
+        int funcSimFoodFoodRestricted;
+        int funcSimFirstaidRobotrepair;
+
+        // Soft-grouping scale (percent). Feeds the soft track's b^(5/4) components.
+        int softGroupingPct;
+
+        // Memoized PairWeight table, row-major [N*N]. Populated by
+        // BuildPairWeightMatrix once per pack when the soft track is active.
+        // pairWeightMatrixN == 0 → not populated → scoring falls back to
+        // recomputing PairWeight per pair.
+        std::vector<unsigned char> pairWeightMatrix;
+        int pairWeightMatrixN;
 
         // FIFO ring. gridCacheCount == 0 is logically empty — stale
         // array contents never matter, only overwritten on insert.
@@ -439,23 +518,31 @@ class Packer
                                   int numRotated, long long groupingBonus, int strandedCells, int groupingWeight,
                                   int fragWeight);
 
-    // Per-component grouping bonus: each connected same-type cluster's shared
-    // border total b is raised to b^(quarters/4) via applyGroupingPower.
-    // quarters=6 (default) reproduces the legacy b^1.5 = b * isqrt(b) formula.
+    // Populate ctx.pairWeightMatrix before any per-iter scoring call. Guard
+    // on softGroupingPct > 0 — the matrix is unused when the soft track is off.
+    static void BuildPairWeightMatrix(PackContext& ctx, const std::vector<Item>& items);
+
+    // Split-track grouping bonus. Exact track: union-find on exactId equality,
+    // per-component b^(quarters/4) via applyGroupingPower (legacy). Soft track:
+    // union-find on PairWeight > 0 (non-exact), per-component b^(5/4).
+    // softGroupingPct == 0 skips the soft track entirely.
+    // If outExactOnly != NULL, writes just the exact-track contribution there.
     static long long ComputeGroupingBonus(const std::vector<Placement>& placements, const std::vector<Item>& items,
-                                          int groupingPowerQuarters);
+                                          const PackContext& ctx, int groupingPowerQuarters,
+                                          long long* outExactOnly = NULL);
 
     // Power-independent companion: returns Σ b per component with no exponent
-    // applied. The harness uses this as the cross-power clustering metric so
+    // applied. Uses the same tier-weighted accumulator as ComputeGroupingBonus.
+    // The harness uses this as the cross-power clustering metric so
     // grouping_bonus heatmaps stay comparable across configs with different
     // groupingPowerQuarters. Called once at the final result, not per-iter.
-    static long long ComputeGroupingBordersRaw(const std::vector<Placement>& placements,
-                                               const std::vector<Item>& items);
+    static long long ComputeGroupingBordersRaw(const std::vector<Placement>& placements, const std::vector<Item>& items,
+                                               const PackContext& ctx);
 
     // Post-process: swap same-footprint items between positions to improve
     // grouping. Physical layout is unchanged since occupied cells are identical.
     static void OptimizeGrouping(std::vector<Placement>& placements, const std::vector<Item>& items,
-                                 int groupingPowerQuarters);
+                                 const PackContext& ctx, int groupingPowerQuarters);
 
     // Count rotated placements (shared between PackH and PackAnnealedH).
     static int CountRotated(const std::vector<Placement>& placements);
@@ -467,8 +554,10 @@ class Packer
     // filter and flush bonus. Returns 0 if not adjacent or filtered out.
     static int SharedBorder(const Placement& a, const Placement& b);
 
-    // Scan border cells for unique adjacent same-type placement IDs.
-    static void CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>& items, int curType, int start,
+    // Scan border cells for unique adjacent placement IDs matching curExactId.
+    // Exact-only by design: skyline tiebreaker runs before the final scorer,
+    // where richer tier matching takes over.
+    static void CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>& items, int curExactId, int start,
                                     int step, int count, int* adjPids, int& numAdj, int maxAdj);
 
     // MAXRECTS placement heuristic helpers (used by MaxRectsPack).
@@ -497,7 +586,8 @@ class Packer
     static void BuildAdjGraph(AdjGraph& g, const std::vector<Placement>& placements);
 
     static long long ComputeGroupingBonusAdj(const std::vector<Placement>& placements, const std::vector<Item>& items,
-                                             const AdjGraph& g, int n, int groupingPowerQuarters);
+                                             const AdjGraph& g, int n, const PackContext& ctx,
+                                             int groupingPowerQuarters);
 
     static const int TARGET_BONUS = 10000;
 };

@@ -1,27 +1,27 @@
 # 12x20_tech_ruin_haul
 # cells=207 density=0.863 weight=55.00
 grid 12 20
-# w h type_id rotatable name
-4 2 182 0 Robotics Components
-4 2 182 0 Robotics Components
-3 2 12 0 Skeleton Repair Kit
-3 2 12 0 Skeleton Repair Kit
-4 3 28 0 Copper Alloy Plates
-4 3 28 0 Copper Alloy Plates
-3 2 21 0 Electrical Components
-2 2 39 0 Engineering Research
-3 3 134 0 Gears
-4 3 112 0 Iron Plates
-4 3 112 0 Iron Plates
-6 1 35 0 Steel Bars
-3 2 19 0 Tools
-3 2 34 0 Foodcube
-3 3 178 0 CPU Unit
-3 3 178 0 CPU Unit
-6 2 171 0 Power Core
-6 2 171 0 Power Core
-4 3 180 0 Motor
-4 3 180 0 Motor
-3 2 183 0 Generator Core
-4 4 38 0 AI Core
-3 2 170 0 Capacitor
+# w h rotatable exactId gameDataType itemFunction flagsMask customGroupId name
+4 2 0 182 -1 -1 2 -1 Robotics Components
+4 2 0 182 -1 -1 2 -1 Robotics Components
+3 2 0 12 -1 12 2 -1 Skeleton Repair Kit
+3 2 0 12 -1 12 2 -1 Skeleton Repair Kit
+4 3 0 28 -1 -1 2 -1 Copper Alloy Plates
+4 3 0 28 -1 -1 2 -1 Copper Alloy Plates
+3 2 0 21 -1 -1 2 -1 Electrical Components
+2 2 0 39 -1 11 2 -1 Engineering Research
+3 3 0 134 -1 -1 2 -1 Gears
+4 3 0 112 -1 -1 2 -1 Iron Plates
+4 3 0 112 -1 -1 2 -1 Iron Plates
+6 1 0 35 -1 -1 2 -1 Steel Bars
+3 2 0 19 -1 9 2 -1 Tools
+3 2 0 34 -1 3 2 -1 Foodcube
+3 3 0 178 -1 -1 2 -1 CPU Unit
+3 3 0 178 -1 -1 2 -1 CPU Unit
+6 2 0 171 -1 -1 2 -1 Power Core
+6 2 0 171 -1 -1 2 -1 Power Core
+4 3 0 180 -1 -1 2 -1 Motor
+4 3 0 180 -1 -1 2 -1 Motor
+3 2 0 183 -1 -1 2 -1 Generator Core
+4 4 0 38 -1 -1 2 -1 AI Core
+3 2 0 170 -1 -1 2 -1 Capacitor

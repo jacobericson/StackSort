@@ -1,18 +1,18 @@
 # 8x8_research_thief
 # cells=59 density=0.922 weight=4.60
 grid 8 8
-# w h type_id rotatable name
-4 4 38 0 AI Core
-2 2 39 0 Engineering Research
-2 2 39 0 Engineering Research
-2 2 39 0 Engineering Research
-1 1 91 0 Blueprints
-1 1 90 0 Blueprints (armour)
-1 1 93 0 Blueprints (gear)
-2 2 40 0 Book
-2 2 177 0 Ancient Science Book
-2 2 86 0 Map of the Ashlands
-2 2 72 0 Ancient Military Documents
-2 2 84 0 Old Treasure Map
-2 2 67 0 Map of the Border Zone
-2 2 110 0 Ration Pack
+# w h rotatable exactId gameDataType itemFunction flagsMask customGroupId name
+4 4 0 38 -1 -1 2 -1 AI Core
+2 2 0 39 -1 11 2 -1 Engineering Research
+2 2 0 39 -1 11 2 -1 Engineering Research
+2 2 0 39 -1 11 2 -1 Engineering Research
+1 1 0 91 -1 11 0 -1 Blueprints
+1 1 0 90 -1 11 0 -1 Blueprints (armour)
+1 1 0 93 -1 11 0 -1 Blueprints (gear)
+2 2 0 40 -1 -1 2 -1 Book
+2 2 0 177 -1 -1 2 -1 Ancient Science Book
+2 2 0 86 102 -1 0 -1 Map of the Ashlands
+2 2 0 72 102 -1 0 -1 Ancient Military Documents
+2 2 0 84 102 -1 0 -1 Old Treasure Map
+2 2 0 67 102 -1 0 -1 Map of the Border Zone
+2 2 0 110 -1 3 2 -1 Ration Pack

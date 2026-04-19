@@ -272,13 +272,13 @@ void Packer::MaxRectsPack(PackContext& ctx, int gridW, int gridH, const std::vec
         if (bestIndex < 0) continue; // Item doesn't fit — skip
 
         Placement p;
-        p.id         = item.id;
-        p.itemTypeId = item.itemTypeId;
-        p.x          = ctx.freeRects[bestIndex].x;
-        p.y          = ctx.freeRects[bestIndex].y;
-        p.w          = bestW;
-        p.h          = bestH;
-        p.rotated    = bestRotated;
+        p.id      = item.id;
+        p.exactId = item.exactId;
+        p.x       = ctx.freeRects[bestIndex].x;
+        p.y       = ctx.freeRects[bestIndex].y;
+        p.w       = bestW;
+        p.h       = bestH;
+        p.rotated = bestRotated;
         ctx.placements.push_back(p);
 
         Rect placed;

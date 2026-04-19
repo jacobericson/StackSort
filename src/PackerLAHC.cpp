@@ -138,8 +138,8 @@ static void ShuffleGroups(std::vector<Packer::Item>& items, LCG& rng)
         Group g;
         g.start    = i;
         g.count    = 1;
-        int typeId = items[i].itemTypeId;
-        while (i + g.count < (int)items.size() && items[i + g.count].itemTypeId == typeId)
+        int typeId = items[i].exactId;
+        while (i + g.count < (int)items.size() && items[i + g.count].exactId == typeId)
             ++g.count;
         groups.push_back(g);
         i += g.count;
@@ -288,6 +288,39 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                                ? params->groupingPowerQuarters
                                : Packer::DEFAULT_GROUPING_POWER_QUARTERS;
 
+    // Grouping tier weights. Sentinel -1 → compiled default; clamp upper to 100.
+    // A weight of 0 disables that tier in PairWeight. Function-similarity
+    // overrides fold into the function tier before the MAX-across-tiers step.
+    int effTierWeightExact =
+        (params && params->tierWeightExact >= 0) ? params->tierWeightExact : Packer::DEFAULT_TIER_WEIGHT_EXACT;
+    int effTierWeightCustom =
+        (params && params->tierWeightCustom >= 0) ? params->tierWeightCustom : Packer::DEFAULT_TIER_WEIGHT_CUSTOM;
+    int effTierWeightType =
+        (params && params->tierWeightType >= 0) ? params->tierWeightType : Packer::DEFAULT_TIER_WEIGHT_TYPE;
+    int effTierWeightFunction =
+        (params && params->tierWeightFunction >= 0) ? params->tierWeightFunction : Packer::DEFAULT_TIER_WEIGHT_FUNCTION;
+    int effTierWeightFlags =
+        (params && params->tierWeightFlags >= 0) ? params->tierWeightFlags : Packer::DEFAULT_TIER_WEIGHT_FLAGS;
+    effTierWeightExact    = std::min(effTierWeightExact, 100);
+    effTierWeightCustom   = std::min(effTierWeightCustom, 100);
+    effTierWeightType     = std::min(effTierWeightType, 100);
+    effTierWeightFunction = std::min(effTierWeightFunction, 100);
+    effTierWeightFlags    = std::min(effTierWeightFlags, 100);
+
+    int effFuncSimFoodFoodRestricted  = (params && params->funcSimFoodFoodRestricted >= 0)
+                                            ? params->funcSimFoodFoodRestricted
+                                            : Packer::DEFAULT_FUNC_SIM_FOOD_FOOD_RESTRICTED;
+    int effFuncSimFirstaidRobotrepair = (params && params->funcSimFirstaidRobotrepair >= 0)
+                                            ? params->funcSimFirstaidRobotrepair
+                                            : Packer::DEFAULT_FUNC_SIM_FIRSTAID_ROBOTREPAIR;
+    effFuncSimFoodFoodRestricted      = std::min(effFuncSimFoodFoodRestricted, 100);
+    effFuncSimFirstaidRobotrepair     = std::min(effFuncSimFirstaidRobotrepair, 100);
+
+    // Soft-grouping scale. 0 disables the soft track; otherwise each soft
+    // edge contributes shared * pair_weight * soft_pct / 10000.
+    int effSoftGroupingPct =
+        (params && params->softGroupingPct >= 0) ? params->softGroupingPct : Packer::DEFAULT_SOFT_GROUPING_PCT;
+
     // Diagnostic counters — populated into *outDiag at the bottom of the function.
     int diagPackCalls                 = 0;
     int diagPlateauBreaks             = 0;
@@ -346,7 +379,20 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     PackContext localCtx;
     PackContext& ctx = reuseCtx ? *reuseCtx : localCtx;
     InitPackContext(ctx, gridW, gridH, (int)items.size());
-    ctx.skylineWasteCoef = effSkylineWasteCoef;
+    ctx.skylineWasteCoef           = effSkylineWasteCoef;
+    ctx.tierWeightExact            = effTierWeightExact;
+    ctx.tierWeightCustom           = effTierWeightCustom;
+    ctx.tierWeightType             = effTierWeightType;
+    ctx.tierWeightFunction         = effTierWeightFunction;
+    ctx.tierWeightFlags            = effTierWeightFlags;
+    ctx.funcSimFoodFoodRestricted  = effFuncSimFoodFoodRestricted;
+    ctx.funcSimFirstaidRobotrepair = effFuncSimFirstaidRobotrepair;
+    ctx.softGroupingPct            = effSoftGroupingPct;
+    // Prebuild the PairWeight lookup table once per pack. Soft-track loops
+    // inside ComputeGroupingBonus* will O(1) lookup instead of recomputing
+    // per LAHC iter. Skipped when the soft track is off.
+    if (effSoftGroupingPct > 0) BuildPairWeightMatrix(ctx, items);
+    else ctx.pairWeightMatrixN = 0;
 
     // Pre-reservation scan (H > 1 only)
     // Reserve a W x target rectangle at the grid bottom and pack into the
@@ -458,7 +504,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     double seedConc =
         ComputeConcentrationAndStrandedCtx(ctx, gridW, gridH, seedLerX, seedLerY, seedLerW, seedLerH, seedStranded);
     int seedNumRot         = CountRotated(ctx.seedPl);
-    long long seedGrouping = ComputeGroupingBonus(ctx.seedPl, items, effGroupingPower);
+    long long seedGrouping = ComputeGroupingBonus(ctx.seedPl, items, ctx, effGroupingPower);
     long long seedScore    = ComputeScore(ctx.seedPl.size(), seedLerA, seedLerH, seedConc, target, seedNumRot,
                                           seedGrouping, seedStranded, effGroupingWeight, effFragWeight);
 
@@ -533,7 +579,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         GridCacheLookup(ctx, gridW, gridH, curLerA, curLerW, curLerH, curLerX, curLerY, curConc, curStranded);
 #endif
         int curNumRot         = CountRotated(ctx.placements);
-        long long curGrouping = ComputeGroupingBonus(ctx.placements, items, effGroupingPower);
+        long long curGrouping = ComputeGroupingBonus(ctx.placements, items, ctx, effGroupingPower);
         long long curScore    = ComputeScore(ctx.placements.size(), curLerA, curLerH, curConc, target, curNumRot,
                                              curGrouping, curStranded, effGroupingWeight, effFragWeight);
 
@@ -750,7 +796,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                         }
                         for (int ki = 0; ki < n; ++ki)
                         {
-                            int typeId = curOrder[ki].itemTypeId;
+                            int typeId = curOrder[ki].exactId;
                             if (typeId < 0 || typeId >= n) continue;
                             if (firstIdx[typeId] < 0) firstIdx[typeId] = ki;
                             ++groupCount[typeId];
@@ -760,7 +806,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                         {
                             // Skip first item of a multi-item type group —
                             // it anchors contact-point clustering for its type.
-                            int typeId = curOrder[ki].itemTypeId;
+                            int typeId = curOrder[ki].exactId;
                             if (typeId >= 0 && typeId < n && ki == firstIdx[typeId] && groupCount[typeId] > 1) continue;
 
                             bool fitsNormal = (curOrder[ki].w <= gapW && curOrder[ki].h <= gapH);
@@ -846,7 +892,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
             PROF_TICK(profConc);
 
             int candNumRot         = CountRotated(ctx.placements);
-            long long candGrouping = ComputeGroupingBonus(ctx.placements, items, effGroupingPower);
+            long long candGrouping = ComputeGroupingBonus(ctx.placements, items, ctx, effGroupingPower);
             PROF_TICK(profGrouping);
 
             long long candScore = ComputeScore(ctx.placements.size(), candLerA, candLerH, candConc, target, candNumRot,
@@ -889,9 +935,8 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                 ++itersSinceImproved;
 
                 UndoMove(curOrder, move);
-                // Snap reflects the packed (rejected) curOrder; undoing leaves
-                // curOrder diverging from the snap at the move's positions,
-                // so keptPrefix vs snap is no longer safe next iter.
+                // Undo leaves curOrder diverging from snap at the move's
+                // positions; keptPrefix vs snap is no longer safe next iter.
                 ctx.skylineSnapValid = false;
             }
 
@@ -932,7 +977,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         // Rescore under effective weights: PackH hardcodes defaults, bestScore doesn't.
         if (unconResult.allPlaced)
         {
-            long long unGrouping      = ComputeGroupingBonus(unconResult.placements, items, effGroupingPower);
+            long long unGrouping      = ComputeGroupingBonus(unconResult.placements, items, ctx, effGroupingPower);
             unconResult.groupingBonus = unGrouping;
             unconResult.score = ComputeScore(unconResult.placements.size(), unconResult.lerArea, unconResult.lerHeight,
                                              unconResult.concentration, target, CountRotated(unconResult.placements),
@@ -955,10 +1000,11 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     PROF_PHASE_END(unc, profUnconstrainedFallback);
 
     PROF_PHASE_BEGIN(optGrp);
-    if (enableOptimizeGrouping) OptimizeGrouping(ctx.bestPl, items, effGroupingPower);
+    if (enableOptimizeGrouping) OptimizeGrouping(ctx.bestPl, items, ctx, effGroupingPower);
     PROF_PHASE_END(optGrp, profOptimizeGrouping);
 
-    long long bestGrouping = ComputeGroupingBonus(ctx.bestPl, items, effGroupingPower);
+    long long bestGroupingExact = 0;
+    long long bestGrouping      = ComputeGroupingBonus(ctx.bestPl, items, ctx, effGroupingPower, &bestGroupingExact);
 
     // Rotated flags relative to original input dims
     for (size_t i = 0; i < ctx.bestPl.size(); ++i)
@@ -998,7 +1044,8 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         // Power-independent clustering metric for cross-power CSV/analysis.
         // Computed once per final result, not per LAHC iter.
         PROF_PHASE_BEGIN(bordersRaw);
-        outDiag->groupingBordersRaw = ComputeGroupingBordersRaw(ctx.bestPl, items);
+        outDiag->groupingBordersRaw = ComputeGroupingBordersRaw(ctx.bestPl, items, ctx);
+        outDiag->groupingBonusExact = bestGroupingExact;
         PROF_PHASE_END(bordersRaw, profBordersRaw);
 #ifdef STACKSORT_PROFILE
         outDiag->profCyclesMoveGen               = (long long)profMoveGen;

@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 """Recipe-driven corpus generator for the StackSort tuning harness.
 
-Reads tests/corpus_recipes/*.recipe and writes tests/corpus/*.txt in the format
-tests/harness/Instance.cpp parses:
+Reads tests/corpus_recipes/*.recipe and writes tests/corpus/*.txt in the
+item-line grammar tests/harness/Instance.cpp parses:
 
     grid W H
-    w h type rotatable name
+    w h rotatable exactId gameDataType itemFunction flagsMask customGroupId name
 
-type_id assignment is per-item-name: the zero-based row index of the item in
-stacksort_catalog.tsv. Catalog growth is append-only (CatalogDump dedups on
-name), so existing type_ids stay stable across dev-build runs.
-
-A complete mapping is written to tests/corpus/type_ids.tsv so analyzers can
-resolve numeric type_ids back to catalog names.
+exactId is the catalog row index so two instances of the same template share
+an id. Catalog growth is append-only (CatalogDump dedups on name), so type_ids
+stay stable across dev-build runs. A name → row-index map goes to
+tests/corpus/type_ids.tsv for analyzer backrefs.
 """
 
 import argparse
@@ -27,6 +25,10 @@ CATALOG_PATH = os.path.join(REPO_DIR, "stacksort_catalog.tsv")
 RECIPES_DIR = os.path.join(SCRIPT_DIR, "corpus_recipes")
 CORPUS_DIR = os.path.join(SCRIPT_DIR, "corpus")
 TYPE_IDS_PATH = os.path.join(CORPUS_DIR, "type_ids.tsv")
+
+# Generic ITEM sentinel in kenshi/Enums.h — too broad to cluster on, so the
+# snapshot and the corpus emitter both map it to -1 (tier skipped).
+ITEM_TYPE_GENERIC = 4
 
 EXPECTED_COLUMNS = [
     "name", "w", "h", "canRotate", "gameDataType", "itemFunction",
@@ -58,10 +60,14 @@ def load_catalog():
                 )
             name = parts[0]
             items[name] = {
-                "w": int(parts[1]),
-                "h": int(parts[2]),
-                "canRotate": int(parts[3]),
-                "weight": float(parts[10]),
+                "w":            int(parts[1]),
+                "h":            int(parts[2]),
+                "canRotate":    int(parts[3]),
+                "gameDataType": int(parts[4]),
+                "itemFunction": int(parts[5]),
+                "foodCrop":     int(parts[6]),
+                "tradeItem":    int(parts[7]),
+                "weight":       float(parts[10]),
             }
             type_ids[name] = idx  # zero-based catalog row index
     return items, type_ids
@@ -159,15 +165,22 @@ def emit_instance(spec, items, type_ids, out_path):
         sum(c * items[n]["weight"] for c, n in spec["items"]),
     ))
     lines.append("grid {} {}".format(spec["grid_w"], spec["grid_h"]))
-    lines.append("# w h type_id rotatable name")
+    lines.append("# w h rotatable exactId gameDataType itemFunction flagsMask customGroupId name")
+
     for count, name in spec["items"]:
         entry = items[name]
-        tid = type_ids[name]
-        row = "{} {} {} {} {}".format(
-            entry["w"], entry["h"], tid, entry["canRotate"], name
+        # Generic ITEM sentinel (enum value 4) and ITEM_NO_FUNCTION (0) are
+        # too broad to cluster on; map them to -1 so the tier skips at runtime.
+        gt = -1 if entry["gameDataType"] == ITEM_TYPE_GENERIC else entry["gameDataType"]
+        fn = -1 if entry["itemFunction"] == 0 else entry["itemFunction"]
+        flags = (entry["foodCrop"] & 1) | ((entry["tradeItem"] & 1) << 1)
+        row = "{} {} {} {} {} {} {} -1 {}".format(
+            entry["w"], entry["h"], entry["canRotate"],
+            type_ids[name], gt, fn, flags, name,
         )
         for _ in range(count):
             lines.append(row)
+
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 

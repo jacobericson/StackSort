@@ -1,40 +1,40 @@
 # 20x20_construction_hauler
 # cells=357 density=0.892 weight=114.00
 grid 20 20
-# w h type_id rotatable name
-6 3 113 0 Building Material
-6 3 113 0 Building Material
-6 3 113 0 Building Material
-6 3 113 0 Building Material
-6 3 113 0 Building Material
-6 3 113 0 Building Material
-4 3 112 0 Iron Plates
-4 3 112 0 Iron Plates
-4 3 112 0 Iron Plates
-4 3 112 0 Iron Plates
-3 2 114 0 Raw Iron
-3 2 114 0 Raw Iron
-3 2 114 0 Raw Iron
-6 1 35 0 Steel Bars
-6 1 35 0 Steel Bars
-6 1 35 0 Steel Bars
-3 2 133 0 Copper
-3 2 133 0 Copper
-3 2 133 0 Copper
-3 3 22 0 Fuel
-3 3 22 0 Fuel
-3 2 37 0 Fabrics
-3 2 37 0 Fabrics
-4 3 28 0 Copper Alloy Plates
-4 3 28 0 Copper Alloy Plates
-4 3 28 0 Copper Alloy Plates
-3 3 135 0 Chainmail Sheets
-3 3 135 0 Chainmail Sheets
-3 3 135 0 Chainmail Sheets
-3 3 135 0 Chainmail Sheets
-3 3 36 0 Cotton
-3 3 36 0 Cotton
-3 3 36 0 Cotton
-2 3 121 0 Leather
-2 3 121 0 Leather
-2 3 121 0 Leather
+# w h rotatable exactId gameDataType itemFunction flagsMask customGroupId name
+6 3 0 113 -1 -1 2 -1 Building Material
+6 3 0 113 -1 -1 2 -1 Building Material
+6 3 0 113 -1 -1 2 -1 Building Material
+6 3 0 113 -1 -1 2 -1 Building Material
+6 3 0 113 -1 -1 2 -1 Building Material
+6 3 0 113 -1 -1 2 -1 Building Material
+4 3 0 112 -1 -1 2 -1 Iron Plates
+4 3 0 112 -1 -1 2 -1 Iron Plates
+4 3 0 112 -1 -1 2 -1 Iron Plates
+4 3 0 112 -1 -1 2 -1 Iron Plates
+3 2 0 114 -1 -1 2 -1 Raw Iron
+3 2 0 114 -1 -1 2 -1 Raw Iron
+3 2 0 114 -1 -1 2 -1 Raw Iron
+6 1 0 35 -1 -1 2 -1 Steel Bars
+6 1 0 35 -1 -1 2 -1 Steel Bars
+6 1 0 35 -1 -1 2 -1 Steel Bars
+3 2 0 133 -1 -1 2 -1 Copper
+3 2 0 133 -1 -1 2 -1 Copper
+3 2 0 133 -1 -1 2 -1 Copper
+3 3 0 22 -1 -1 2 -1 Fuel
+3 3 0 22 -1 -1 2 -1 Fuel
+3 2 0 37 -1 -1 2 -1 Fabrics
+3 2 0 37 -1 -1 2 -1 Fabrics
+4 3 0 28 -1 -1 2 -1 Copper Alloy Plates
+4 3 0 28 -1 -1 2 -1 Copper Alloy Plates
+4 3 0 28 -1 -1 2 -1 Copper Alloy Plates
+3 3 0 135 -1 -1 2 -1 Chainmail Sheets
+3 3 0 135 -1 -1 2 -1 Chainmail Sheets
+3 3 0 135 -1 -1 2 -1 Chainmail Sheets
+3 3 0 135 -1 -1 2 -1 Chainmail Sheets
+3 3 0 36 -1 -1 2 -1 Cotton
+3 3 0 36 -1 -1 2 -1 Cotton
+3 3 0 36 -1 -1 2 -1 Cotton
+2 3 0 121 -1 -1 2 -1 Leather
+2 3 0 121 -1 -1 2 -1 Leather
+2 3 0 121 -1 -1 2 -1 Leather
