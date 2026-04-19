@@ -71,7 +71,6 @@ void Packer::InitPackContext(PackContext& ctx, int gridW, int gridH, int numItem
     ctx.pairWeightMatrixN = 0;
     ctx.gridCacheCount    = 0;
     ctx.gridCacheHead     = 0;
-    ctx.gridCacheGridBlob.resize((size_t)64 * (size_t)totalCells);
 
     // Seed Zobrist tables from grid dimensions only — cache entries survive
     // restart boundaries so the key must be stable across restarts. Skip
@@ -98,7 +97,6 @@ void Packer::InitPackContext(PackContext& ctx, int gridW, int gridH, int numItem
     ctx.skylineSnapBoundaries.reserve((size_t)numItems + 1);
     ctx.skylineSnapWaste.reserve((size_t)numItems * 30);
     ctx.skylineSnapSkyline.reserve((size_t)numItems * 20);
-    ctx.skylineSnapGridDelta.reserve((size_t)totalCells);
     ctx.skylineSnapN     = 0;
     ctx.skylineSnapValid = false;
     memset(ctx.typeCount, 0, sizeof(ctx.typeCount));

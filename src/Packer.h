@@ -330,9 +330,9 @@ class Packer
 
     struct GridCacheEntry
     {
-        // Twin 64-bit hash defeats birthday collisions that a single
-        // 64-bit would see ~1% over a full corpus run — required for
-        // bit-exact determinism across cache hits vs misses.
+        // 128-bit twin Zobrist key. Birthday-bound collision at realistic
+        // distinct-grid counts (~10^5 per run) is ~10^-31 — authoritative
+        // for bit-exact determinism without a parallel grid-blob compare.
         unsigned long long hashA;
         unsigned long long hashB;
         int lerArea;
@@ -354,8 +354,6 @@ class Packer
         int wasteCount;
         int skylineStart;
         int skylineCount;
-        int gridDeltaStart;
-        int gridDeltaCount;
         unsigned long long hashA;
         unsigned long long hashB;
     };
@@ -430,12 +428,6 @@ class Packer
         int gridCacheCount;
         int gridCacheHead;
 
-        // Parallel per-slot grid copy for memcmp fallback on hash hit — kills
-        // the 2^-128 twin-Zobrist collision tail so behavior is bit-exact
-        // regardless of which cache key function is used. Sized 64*totalCells
-        // in InitPackContext.
-        std::vector<unsigned char> gridCacheGridBlob;
-
         // Zobrist keying for GridCacheLookup. Tables are pure functions of
         // (gridW, gridH) seeded via splitmix64 with independent constants
         // per table, so the twin-hash retains 128-bit entropy. curHashA/B
@@ -455,7 +447,6 @@ class Packer
         std::vector<SkylineBoundary> skylineSnapBoundaries;
         std::vector<Rect> skylineSnapWaste;
         std::vector<SkylineNode> skylineSnapSkyline;
-        std::vector<int> skylineSnapGridDelta;
         int skylineSnapN;
         bool skylineSnapValid;
 
@@ -549,8 +540,12 @@ class Packer
 
     // Flood-fill ctx.visited from cells inside the LER rect through
     // 4-connected empty space. Shared between the fused scorer above and
-    // the repair_move branch in PackAnnealedH.
-    static void FloodFillFromLer(PackContext& ctx, int gridW, int gridH, int lerX, int lerY, int lerW, int lerH);
+    // the repair_move branch in PackAnnealedH. extGrid != NULL reads
+    // occupancy from the caller's buffer instead of ctx.grid — required
+    // when the caller needs ctx.grid to stay untouched for incremental
+    // maintenance. Output still lands in ctx.visited.
+    static void FloodFillFromLer(PackContext& ctx, int gridW, int gridH, int lerX, int lerY, int lerW, int lerH,
+                                 const unsigned char* extGrid = NULL);
 
     // Hashes ctx.grid (caller must have built it via BuildOccupancyGrid),
     // returns cached LER + Concentration on hit or computes and inserts on

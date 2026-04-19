@@ -167,9 +167,25 @@ static void ShuffleGroups(std::vector<Packer::Item>& items, LCG& rng)
 
 // Empty sentinel for placementIdGrid is -1 (not 0) — writing 0 would alias
 // pidx=0 and corrupt CollectAdjacentPids.
-static void RestoreSkylineState(Packer::PackContext& ctx, int /*gridW*/, int /*gridH*/, int keptPrefix)
+static void RestoreSkylineState(Packer::PackContext& ctx, int gridW, int /*gridH*/, int keptPrefix)
 {
     const Packer::SkylineBoundary& b = ctx.skylineSnapBoundaries[(size_t)keptPrefix];
+
+    // Roll back ctx.grid + placementIdGrid for every placement being
+    // discarded. Walking placements directly is equivalent to the old
+    // per-cell gridDelta log and avoids the per-cell push_back cost in
+    // EmitBoundary's hot path.
+    for (size_t i = (size_t)b.placementsCount; i < ctx.placements.size(); ++i)
+    {
+        const Packer::Placement& p = ctx.placements[i];
+        for (int dy = 0; dy < p.h; ++dy)
+            for (int dx = 0; dx < p.w; ++dx)
+            {
+                int cellIdx                  = (p.y + dy) * gridW + (p.x + dx);
+                ctx.grid[cellIdx]            = 0;
+                ctx.placementIdGrid[cellIdx] = -1;
+            }
+    }
 
     ctx.placements.resize((size_t)b.placementsCount);
 
@@ -195,22 +211,11 @@ static void RestoreSkylineState(Packer::PackContext& ctx, int /*gridW*/, int /*g
     ctx.curHashA = b.hashA;
     ctx.curHashB = b.hashB;
 
-    for (int k = keptPrefix + 1; k <= ctx.skylineSnapN; ++k)
-    {
-        const Packer::SkylineBoundary& bj = ctx.skylineSnapBoundaries[(size_t)k];
-        for (int i = 0; i < bj.gridDeltaCount; ++i)
-        {
-            int cellIdx                          = ctx.skylineSnapGridDelta[(size_t)bj.gridDeltaStart + (size_t)i];
-            ctx.placementIdGrid[(size_t)cellIdx] = -1;
-        }
-    }
-
     // SkylinePack's emit-on-placement push_backs must land at boundary k+1;
     // stale entries past boundary[keptPrefix] would otherwise offset them.
     ctx.skylineSnapBoundaries.resize((size_t)keptPrefix + 1);
     ctx.skylineSnapWaste.resize((size_t)b.wasteStart + (size_t)b.wasteCount);
     ctx.skylineSnapSkyline.resize((size_t)b.skylineStart + (size_t)b.skylineCount);
-    ctx.skylineSnapGridDelta.resize((size_t)b.gridDeltaStart + (size_t)b.gridDeltaCount);
 }
 
 Packer::Result Packer::PackAnnealed(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim, int target,
@@ -580,7 +585,8 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         SkylinePack(ctx, gridW, gridH, curOrder, target, abortFlag, bestReserveX, bestReserveW);
         ++diagPackCalls;
         if (abortFlag && *abortFlag != 0) break;
-        BuildOccupancyGrid(ctx, gridW, gridH);
+        // ctx.grid is maintained incrementally inside SkylinePack — no
+        // BuildOccupancyGrid rebuild needed before the scorer reads it.
 
         int curLerA, curLerW, curLerH, curLerX, curLerY;
         int curStranded = 0;
@@ -705,19 +711,21 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                 {
                     ++diagRepairMoveScans;
                     // Rebuild ctx.bestPl occupancy + LER reachability only when
-                    // ctx.bestPl changed. Cache hit: memcpy 800 bytes vs full
-                    // rebuild + flood fill (~2-4us).
+                    // ctx.bestPl changed. Cache hit: memcpy 400 bytes vs full
+                    // rebuild + flood fill (~2-4us). ctx.grid is kept
+                    // incrementally current by SkylinePack for the *current*
+                    // ordering, so we build bestPl occupancy into repairGrid
+                    // directly rather than clobbering ctx.grid.
                     if (repairGridDirty)
                     {
-                        memset(&ctx.grid[0], 0, totalCellsRepair);
+                        memset(&repairGrid[0], 0, totalCellsRepair);
                         for (size_t pi = 0; pi < ctx.bestPl.size(); ++pi)
                         {
                             const Placement& bp = ctx.bestPl[pi];
                             for (int dy = 0; dy < bp.h; ++dy)
-                                memset(&ctx.grid[(bp.y + dy) * gridW + bp.x], 1, bp.w);
+                                memset(&repairGrid[(bp.y + dy) * gridW + bp.x], 1, bp.w);
                         }
-                        FloodFillFromLer(ctx, gridW, gridH, bestLerX, bestLerY, bestLerW, bestLerH);
-                        memcpy(&repairGrid[0], &ctx.grid[0], totalCellsRepair);
+                        FloodFillFromLer(ctx, gridW, gridH, bestLerX, bestLerY, bestLerW, bestLerH, &repairGrid[0]);
                         memcpy(&repairReachable[0], &ctx.visited[0], totalCellsRepair);
                         // Build stranded-cell list in the same scan order the
                         // reservoir loop used to walk, so the RNG stream below
@@ -728,14 +736,13 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                             for (int sx = 1; sx < gridW - 1; ++sx)
                             {
                                 int si = sy * gridW + sx;
-                                if (ctx.grid[si] == 0 && !ctx.visited[si]) repairStrandedList.push_back(si);
+                                if (repairGrid[si] == 0 && !ctx.visited[si]) repairStrandedList.push_back(si);
                             }
                         }
                         repairGridDirty = false;
                     }
                     else
                     {
-                        memcpy(&ctx.grid[0], &repairGrid[0], totalCellsRepair);
                         memcpy(&ctx.visited[0], &repairReachable[0], totalCellsRepair);
                     }
 
@@ -775,22 +782,22 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                             minGY  = std::min(minGY, cy);
                             maxGY  = std::max(maxGY, cy);
 
-                            if (cx > 0 && !ctx.visited[ci - 1] && !ctx.grid[ci - 1])
+                            if (cx > 0 && !ctx.visited[ci - 1] && !repairGrid[ci - 1])
                             {
                                 ctx.visited[ci - 1] = 1;
                                 ctx.floodStack.push_back(ci - 1);
                             }
-                            if (cx < gridW - 1 && !ctx.visited[ci + 1] && !ctx.grid[ci + 1])
+                            if (cx < gridW - 1 && !ctx.visited[ci + 1] && !repairGrid[ci + 1])
                             {
                                 ctx.visited[ci + 1] = 1;
                                 ctx.floodStack.push_back(ci + 1);
                             }
-                            if (cy > 0 && !ctx.visited[ci - gridW] && !ctx.grid[ci - gridW])
+                            if (cy > 0 && !ctx.visited[ci - gridW] && !repairGrid[ci - gridW])
                             {
                                 ctx.visited[ci - gridW] = 1;
                                 ctx.floodStack.push_back(ci - gridW);
                             }
-                            if (cy < gridH - 1 && !ctx.visited[ci + gridW] && !ctx.grid[ci + gridW])
+                            if (cy < gridH - 1 && !ctx.visited[ci + gridW] && !repairGrid[ci + gridW])
                             {
                                 ctx.visited[ci + gridW] = 1;
                                 ctx.floodStack.push_back(ci + gridW);
@@ -885,8 +892,6 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
             if (abortFlag && *abortFlag != 0) break;
 
             PROF_TICK(profSkyline);
-
-            BuildOccupancyGrid(ctx, gridW, gridH);
 
             int candLerA, candLerW, candLerH, candLerX, candLerY;
             int candStranded = 0;

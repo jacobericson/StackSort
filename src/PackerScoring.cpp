@@ -344,7 +344,8 @@ double Packer::ComputeConcentrationAndStrandedCtx(PackContext& ctx, int gridW, i
 // 4-connected empty cells starting from all empty cells inside the LER
 // rectangle. On return, ctx.visited[i] == 1 iff cell i is empty AND
 // reachable from the LER through empty cells.
-void Packer::FloodFillFromLer(PackContext& ctx, int gridW, int gridH, int lerX, int lerY, int lerW, int lerH)
+void Packer::FloodFillFromLer(PackContext& ctx, int gridW, int gridH, int lerX, int lerY, int lerW, int lerH,
+                              const unsigned char* extGrid)
 {
     int totalCells = gridW * gridH;
     if (totalCells == 0) return;
@@ -355,7 +356,7 @@ void Packer::FloodFillFromLer(PackContext& ctx, int gridW, int gridH, int lerX, 
     if ((int)ctx.floodStack.size() < totalCells) ctx.floodStack.resize(totalCells);
     int* flood                   = &ctx.floodStack[0];
     unsigned char* vis           = &ctx.visited[0];
-    const unsigned char* gridPtr = &ctx.grid[0];
+    const unsigned char* gridPtr = extGrid ? extGrid : &ctx.grid[0];
     int floodTop                 = 0;
 
     for (int y = lerY; y < lerY + lerH; ++y)
@@ -453,6 +454,11 @@ static void uf_unite(int* parent, int a, int b)
 // and flush bonus. Returns 0 if no qualifying border.
 int Packer::SharedBorder(const Placement& a, const Placement& b)
 {
+    // AABB early-out: if one rect's left edge is past the other's right edge
+    // (or symmetric in y), the pair can't share a border. Strict > so
+    // touching pairs (a.x + a.w == b.x, etc.) still reach the overlap logic.
+    if (a.x > b.x + b.w || b.x > a.x + a.w || a.y > b.y + b.h || b.y > a.y + a.h) return 0;
+
     int overlapX1 = (a.x > b.x) ? a.x : b.x;
     int overlapX2 = ((a.x + a.w) < (b.x + b.w)) ? (a.x + a.w) : (b.x + b.w);
     int overlapY1 = (a.y > b.y) ? a.y : b.y;

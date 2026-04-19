@@ -61,10 +61,14 @@ static void SkylineReset(Packer::PackContext& ctx, int gridW)
     ctx.skylineHead              = head;
 }
 
-// placeW == 0 is the no-placement sentinel; boundaries must still advance
-// in lock-step with idx for unfittable items so index = placements.size()+
-// unfittable_count invariant holds.
-static void EmitBoundary(Packer::PackContext& ctx, int gridW, int placeX, int placeY, int placeW, int placeH)
+// Commit-time boundary snapshot. Skyline, waste, and hash state are already
+// up-to-date by the time this is called — the caller (SkylinePack commit
+// paths) folds grid/zobrist updates into the same cell walk that stamps
+// placementIdGrid, so EmitBoundary only copies the already-current state.
+// placeX/placeY/placeW/placeH are retained in the signature for call-site
+// clarity but are unused here.
+static void EmitBoundary(Packer::PackContext& ctx, int /*gridW*/, int /*placeX*/, int /*placeY*/, int /*placeW*/,
+                         int /*placeH*/)
 {
     Packer::SkylineBoundary b;
     b.placementsCount = (int)ctx.placements.size();
@@ -78,24 +82,9 @@ static void EmitBoundary(Packer::PackContext& ctx, int gridW, int placeX, int pl
         ctx.skylineSnapSkyline.push_back(ctx.skylineNodes[s]);
         ++skylineCount;
     }
-    b.skylineCount   = skylineCount;
-    b.gridDeltaStart = (int)ctx.skylineSnapGridDelta.size();
-    if (placeW > 0)
-    {
-        const unsigned long long* zA = &ctx.zobristA[0];
-        const unsigned long long* zB = &ctx.zobristB[0];
-        for (int dy = 0; dy < placeH; ++dy)
-            for (int dx = 0; dx < placeW; ++dx)
-            {
-                int cellIdx = (placeY + dy) * gridW + (placeX + dx);
-                ctx.skylineSnapGridDelta.push_back(cellIdx);
-                ctx.curHashA ^= zA[cellIdx];
-                ctx.curHashB ^= zB[cellIdx];
-            }
-    }
-    b.gridDeltaCount = (int)ctx.skylineSnapGridDelta.size() - b.gridDeltaStart;
-    b.hashA          = ctx.curHashA;
-    b.hashB          = ctx.curHashB;
+    b.skylineCount = skylineCount;
+    b.hashA        = ctx.curHashA;
+    b.hashB        = ctx.curHashB;
     ctx.skylineSnapBoundaries.push_back(b);
 }
 
@@ -143,10 +132,15 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         ctx.placementIdGrid.resize(totalCells);
         memset(&ctx.placementIdGrid[0], 0xFF, totalCells * sizeof(int));
 
+        // ctx.grid is maintained incrementally across commits + rollbacks so
+        // callers (ComputeLERCtx, GridCacheLookup) can read it without a
+        // full BuildOccupancyGrid rebuild. Reset on every cold start.
+        ctx.grid.resize(totalCells);
+        memset(&ctx.grid[0], 0, totalCells);
+
         ctx.skylineSnapBoundaries.clear();
         ctx.skylineSnapWaste.clear();
         ctx.skylineSnapSkyline.clear();
-        ctx.skylineSnapGridDelta.clear();
         memset(ctx.typeCount, 0, sizeof(ctx.typeCount));
         ctx.curHashA = 0;
         ctx.curHashB = 0;
@@ -226,10 +220,18 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
             if (p.exactId >= 0 && p.exactId < 512) ++ctx.typeCount[p.exactId];
 
             {
-                int pidx = (int)ctx.placements.size() - 1;
+                int pidx                     = (int)ctx.placements.size() - 1;
+                const unsigned long long* zA = &ctx.zobristA[0];
+                const unsigned long long* zB = &ctx.zobristB[0];
                 for (int dy = 0; dy < p.h; ++dy)
                     for (int dx = 0; dx < p.w; ++dx)
-                        ctx.placementIdGrid[(p.y + dy) * gridW + (p.x + dx)] = pidx;
+                    {
+                        int cellIdx                  = (p.y + dy) * gridW + (p.x + dx);
+                        ctx.placementIdGrid[cellIdx] = pidx;
+                        ctx.grid[cellIdx]            = 1;
+                        ctx.curHashA ^= zA[cellIdx];
+                        ctx.curHashB ^= zB[cellIdx];
+                    }
             }
 
             int remRightW  = wr.w - wasteW;
@@ -311,11 +313,19 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                         continue;
                     }
 
-                    int maxY         = 0;
-                    int areaUnder    = 0;
-                    int widthCovered = 0;
-                    bool aborted     = false;
+                    int maxY      = 0;
+                    int areaUnder = 0;
+                    bool aborted  = false;
+                    bool covered  = false;
 
+                    // Walk starts at sj == si where segLeft == x, and the
+                    // skyline is contiguous with monotonically increasing
+                    // segLeft thereafter. overlapLeft therefore always
+                    // equals segLeft on every iteration, so overlapW
+                    // simplifies to (overlapRight - segLeft). The inner
+                    // loop runs until overlapRight covers x + iw (fit) or
+                    // we walk off the skyline tail (no fit).
+                    int xEnd = x + iw;
                     for (short sj = si; sj >= 0; sj = ctx.skylineNext[sj])
                     {
                         int segY = ctx.skylineNodes[sj].y;
@@ -330,16 +340,16 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                         }
                         int segLeft      = ctx.skylineNodes[sj].x;
                         int segRight     = segLeft + ctx.skylineNodes[sj].width;
-                        int overlapLeft  = (x > segLeft) ? x : segLeft;
-                        int overlapRight = ((x + iw) < segRight) ? (x + iw) : segRight;
-                        int overlapW     = overlapRight - overlapLeft;
-                        if (overlapW <= 0) break;
-                        areaUnder += overlapW * segY;
-                        widthCovered += overlapW;
-                        if (widthCovered >= iw) break;
+                        int overlapRight = (xEnd < segRight) ? xEnd : segRight;
+                        areaUnder += (overlapRight - segLeft) * segY;
+                        if (overlapRight >= xEnd)
+                        {
+                            covered = true;
+                            break;
+                        }
                     }
 
-                    if (aborted || widthCovered < iw)
+                    if (aborted || !covered)
                     {
                         SUBPHASE_END(cand, ctx.profCyclesSkylineCandidate);
                         continue;
@@ -426,10 +436,18 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         if (p.exactId >= 0 && p.exactId < 512) ++ctx.typeCount[p.exactId];
 
         {
-            int pidx = (int)ctx.placements.size() - 1;
+            int pidx                     = (int)ctx.placements.size() - 1;
+            const unsigned long long* zA = &ctx.zobristA[0];
+            const unsigned long long* zB = &ctx.zobristB[0];
             for (int dy = 0; dy < bestH; ++dy)
                 for (int dx = 0; dx < bestW; ++dx)
-                    ctx.placementIdGrid[(bestY + dy) * gridW + (bestX + dx)] = pidx;
+                {
+                    int cellIdx                  = (bestY + dy) * gridW + (bestX + dx);
+                    ctx.placementIdGrid[cellIdx] = pidx;
+                    ctx.grid[cellIdx]            = 1;
+                    ctx.curHashA ^= zA[cellIdx];
+                    ctx.curHashB ^= zB[cellIdx];
+                }
         }
 
         int placeLeft  = bestX;
