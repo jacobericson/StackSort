@@ -32,7 +32,7 @@
 #define STACKSORT_GIT_SHA "unknown"
 #endif
 
-static const int CSV_SCHEMA_VERSION = 2;
+static const int CSV_SCHEMA_VERSION = 3;
 
 struct Args
 {
@@ -208,6 +208,8 @@ static std::vector<std::string> BuildHeader()
     h.push_back("enable_fast_converge");
     h.push_back("enable_repair_move");
     h.push_back("enable_pre_reservation");
+    h.push_back("enable_strip_shift");
+    h.push_back("enable_tile_swap");
     h.push_back("all_placed");
     h.push_back("num_placed");
     h.push_back("score");
@@ -255,6 +257,14 @@ static std::vector<std::string> BuildHeader()
     h.push_back("first_pass_repair_scans");
     h.push_back("first_pass_repair_hits");
     h.push_back("first_pass_repair_accepts");
+    h.push_back("strip_shift_strips_found");
+    h.push_back("strip_shift_strips_improved");
+    h.push_back("tile_swap_candidates_found");
+    h.push_back("tile_swap_candidates_committed");
+    h.push_back("first_pass_strip_shift_strips_found");
+    h.push_back("first_pass_strip_shift_strips_improved");
+    h.push_back("first_pass_tile_swap_candidates_found");
+    h.push_back("first_pass_tile_swap_candidates_committed");
     h.push_back("scoring_grouping_power_quarters");
     h.push_back("skyline_waste_coef");
     h.push_back("tier_weight_exact");
@@ -282,6 +292,8 @@ static std::vector<std::string> BuildHeader()
     h.push_back("fp_cycles_greedy_seed");            // per-run: BSSF + BAF + selection
     h.push_back("fp_cycles_unconstrained_fallback"); // per-run: optional fallback PackH
     h.push_back("fp_cycles_optimize_grouping");      // per-run: post-LAHC same-footprint swap
+    h.push_back("fp_cycles_strip_shift");            // per-run: post-LAHC strip permutation
+    h.push_back("fp_cycles_tile_swap");              // per-run: post-LAHC multi-placement swap
     h.push_back("fp_cycles_borders_raw");            // per-run: final cross-power clustering metric
     h.push_back("fp_kept_prefix_sum");
     h.push_back("fp_kept_prefix_count");
@@ -303,19 +315,18 @@ static int run(int argc, char** argv)
     Args args;
     if (!ParseArgs(argc, argv, args)) return 1;
 
-#ifdef STACKSORT_PROFILE
-    // Default: pin to core 1 so rdtsc deltas stay on one TSC domain.
-    // STACKSORT_PROFILE_AFFINITY=<mask> overrides; set to a hex mask per
-    // shard to spread parallel workers across distinct cores. Setting to
-    // "0" disables pinning entirely (relies on invariant TSC for cross-
-    // core consistency; adds migration noise but allows N-way parallelism).
+    // CPU affinity pinning. Honored by both profile and non-profile builds
+    // so run_matrix.py --pin-shards works uniformly. Mask comes from the env
+    // var STACKSORT_PROFILE_AFFINITY (name kept for backward compat). Default
+    // mask = 1 (core 0) so rdtsc deltas stay on one TSC domain in profile
+    // builds and so parallel shards get distinct cores via --pin-shards in
+    // non-profile. Set env var to "0" to disable pinning entirely.
     {
         const char* affEnv = getenv("STACKSORT_PROFILE_AFFINITY");
         DWORD_PTR mask     = 1;
         if (affEnv && *affEnv) mask = (DWORD_PTR)_strtoui64(affEnv, NULL, 0);
         if (mask != 0) SetProcessAffinityMask(GetCurrentProcess(), mask);
     }
-#endif
 
     // Load baseline first so ablation configs can inherit from it.
     std::string configDir = ".";
@@ -510,6 +521,8 @@ static int run(int argc, char** argv)
                 row.push_back(IntToStr(runParams.enableFastConverge));
                 row.push_back(IntToStr(runParams.enableRepairMove));
                 row.push_back(IntToStr(runParams.enablePreReservation));
+                row.push_back(IntToStr(runParams.enableStripShift));
+                row.push_back(IntToStr(runParams.enableTileSwap));
                 row.push_back(BoolToStr(finalResult.allPlaced));
                 row.push_back(IntToStr((int)finalResult.placements.size()));
                 row.push_back(IntToStr(finalResult.score));
@@ -561,6 +574,14 @@ static int run(int argc, char** argv)
                 row.push_back(IntToStr(firstDiag.repairMoveScans));
                 row.push_back(IntToStr(firstDiag.repairMoveHits));
                 row.push_back(IntToStr(firstDiag.repairMoveAccepts));
+                row.push_back(IntToStr(finalDiag.stripShiftStripsFound));
+                row.push_back(IntToStr(finalDiag.stripShiftStripsImproved));
+                row.push_back(IntToStr(finalDiag.tileSwapCandidatesFound));
+                row.push_back(IntToStr(finalDiag.tileSwapCandidatesCommitted));
+                row.push_back(IntToStr(firstDiag.stripShiftStripsFound));
+                row.push_back(IntToStr(firstDiag.stripShiftStripsImproved));
+                row.push_back(IntToStr(firstDiag.tileSwapCandidatesFound));
+                row.push_back(IntToStr(firstDiag.tileSwapCandidatesCommitted));
                 int resolvedGPQ = (runParams.groupingPowerQuarters >= 1 && runParams.groupingPowerQuarters <= 8)
                                       ? runParams.groupingPowerQuarters
                                       : Packer::DEFAULT_GROUPING_POWER_QUARTERS;
@@ -620,6 +641,8 @@ static int run(int argc, char** argv)
                 row.push_back(IntToStr(firstDiag.profCyclesGreedySeed));
                 row.push_back(IntToStr(firstDiag.profCyclesUnconstrainedFallback));
                 row.push_back(IntToStr(firstDiag.profCyclesOptimizeGrouping));
+                row.push_back(IntToStr(firstDiag.profCyclesStripShift));
+                row.push_back(IntToStr(firstDiag.profCyclesTileSwap));
                 row.push_back(IntToStr(firstDiag.profCyclesBordersRaw));
                 row.push_back(IntToStr(firstDiag.keptPrefixSum));
                 row.push_back(IntToStr(firstDiag.keptPrefixCount));

@@ -958,6 +958,556 @@ void Packer::OptimizeGrouping(std::vector<Placement>& placements, const std::vec
     }
 }
 
+// Rewrite placementIdGrid for a set of placement indices. The cells those
+// placements covered in their *old* positions should already have been
+// overwritten by their new positions elsewhere in the same batch — callers use
+// this after mutating placements[idx].{x,y} for a layout-preserving move.
+
+static void StampPlacementCells(std::vector<int>& placementIdGrid, const std::vector<Packer::Placement>& placements,
+                                int gridW, const int* indices, int count)
+{
+    for (int k = 0; k < count; ++k)
+    {
+        int idx                    = indices[k];
+        const Packer::Placement& p = placements[idx];
+        for (int dy = 0; dy < p.h; ++dy)
+        {
+            int rowOffset = (p.y + dy) * gridW;
+            for (int dx = 0; dx < p.w; ++dx)
+                placementIdGrid[rowOffset + (p.x + dx)] = idx;
+        }
+    }
+}
+
+// Permute items within contiguous strips. A vertical strip is a set of
+// placements sharing (x, w) with heights stacked contiguously along y; a
+// horizontal strip is the transposed version. Cell occupancy is preserved
+// because the strip's bounding rectangle is unchanged; only which item
+// occupies which slice shifts. Adjacency is re-scored via the full
+// ComputeGroupingBonusAdj path so exactId/soft-tier weights apply.
+
+void Packer::StripShift(std::vector<Placement>& placements, const std::vector<Item>& items, PackContext& ctx, int gridW,
+                        int gridH, int groupingPowerQuarters, int* outStripsFound, int* outStripsImproved)
+{
+    (void)gridH;
+
+    int n = (int)placements.size();
+    if (n <= 1 || n > 256) return;
+
+    int stripsFound    = 0;
+    int stripsImproved = 0;
+
+    // Scratch arrays sized for the worst strip (n <= 5).
+    static const int STRIP_CAP = 5;
+    int stripIdx[STRIP_CAP];
+    int origH[STRIP_CAP];
+    int origY[STRIP_CAP];
+    int perm[STRIP_CAP];
+    int bestPerm[STRIP_CAP];
+
+    AdjGraph g;
+
+    // Two passes: axis == 0 for vertical strips (share x+w, stack along y),
+    // axis == 1 for horizontal strips (share y+h, stack along x).
+    // Within one axis a placement can only belong to one strip; across axes
+    // it can participate twice.
+    unsigned char usedV[256];
+    unsigned char usedH[256];
+    std::memset(usedV, 0, sizeof(usedV));
+    std::memset(usedH, 0, sizeof(usedH));
+
+    for (int axis = 0; axis < 2; ++axis)
+    {
+        unsigned char* used = (axis == 0) ? usedV : usedH;
+
+        for (int head = 0; head < n; ++head)
+        {
+            if (used[head]) continue;
+
+            // Walk to the min-coord end of the strip containing `head`.
+            int bot = head;
+            for (bool found = true; found;)
+            {
+                found = false;
+                for (int k = 0; k < n; ++k)
+                {
+                    if (k == bot || used[k]) continue;
+                    const Placement& kp = placements[k];
+                    const Placement& bp = placements[bot];
+                    if (axis == 0)
+                    {
+                        if (kp.x == bp.x && kp.w == bp.w && kp.y + kp.h == bp.y)
+                        {
+                            bot   = k;
+                            found = true;
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        if (kp.y == bp.y && kp.h == bp.h && kp.x + kp.w == bp.x)
+                        {
+                            bot   = k;
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Collect the strip by walking upward/right from bot.
+            int stripLen         = 0;
+            stripIdx[stripLen++] = bot;
+            used[bot]            = 1;
+            int cur              = bot;
+            while (stripLen < STRIP_CAP)
+            {
+                int next            = -1;
+                const Placement& cp = placements[cur];
+                int expectCoord     = (axis == 0) ? (cp.y + cp.h) : (cp.x + cp.w);
+                for (int k = 0; k < n; ++k)
+                {
+                    if (used[k]) continue;
+                    const Placement& kp = placements[k];
+                    if (axis == 0)
+                    {
+                        if (kp.x == cp.x && kp.w == cp.w && kp.y == expectCoord)
+                        {
+                            next = k;
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        if (kp.y == cp.y && kp.h == cp.h && kp.x == expectCoord)
+                        {
+                            next = k;
+                            break;
+                        }
+                    }
+                }
+                if (next < 0) break;
+                stripIdx[stripLen++] = next;
+                used[next]           = 1;
+                cur                  = next;
+            }
+
+            // Skip trivial strips. Length-1 is not a strip; >STRIP_CAP items
+            // would need a different enumeration strategy.
+            if (stripLen < 2) continue;
+
+            // Detect longer strips so we can mark their tail but skip
+            // enumeration — conservatively leave them for a future pass.
+            bool tailOverflowed = false;
+            if (stripLen == STRIP_CAP)
+            {
+                const Placement& cp = placements[cur];
+                int expectCoord     = (axis == 0) ? (cp.y + cp.h) : (cp.x + cp.w);
+                for (int k = 0; k < n; ++k)
+                {
+                    if (used[k]) continue;
+                    const Placement& kp = placements[k];
+                    bool hit            = (axis == 0) ? (kp.x == cp.x && kp.w == cp.w && kp.y == expectCoord)
+                                                      : (kp.y == cp.y && kp.h == cp.h && kp.x == expectCoord);
+                    if (hit)
+                    {
+                        tailOverflowed = true;
+                        break;
+                    }
+                }
+            }
+            if (tailOverflowed) continue;
+
+            ++stripsFound;
+
+            // Capture originals.
+            int baseCoord = (axis == 0) ? placements[stripIdx[0]].y : placements[stripIdx[0]].x;
+            for (int i = 0; i < stripLen; ++i)
+            {
+                origH[i]    = (axis == 0) ? placements[stripIdx[i]].h : placements[stripIdx[i]].w;
+                origY[i]    = (axis == 0) ? placements[stripIdx[i]].y : placements[stripIdx[i]].x;
+                perm[i]     = i;
+                bestPerm[i] = i;
+            }
+
+            // Score identity first so we compare apples to apples.
+            BuildAdjGraph(g, placements);
+            long long bestScore = ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
+            long long baseScore = bestScore;
+
+            // Enumerate remaining permutations. next_permutation starts from
+            // current perm [0,1,..,m-1] and walks lex order through the rest.
+            while (std::next_permutation(perm, perm + stripLen))
+            {
+                int cy = baseCoord;
+                for (int i = 0; i < stripLen; ++i)
+                {
+                    Placement& p = placements[stripIdx[perm[i]]];
+                    if (axis == 0) p.y = cy;
+                    else p.x = cy;
+                    cy += origH[perm[i]];
+                }
+
+                BuildAdjGraph(g, placements);
+                long long score = ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    for (int i = 0; i < stripLen; ++i)
+                        bestPerm[i] = perm[i];
+                }
+            }
+
+            // Restore to bestPerm layout.
+            {
+                int cy = baseCoord;
+                for (int i = 0; i < stripLen; ++i)
+                {
+                    Placement& p = placements[stripIdx[bestPerm[i]]];
+                    if (axis == 0) p.y = cy;
+                    else p.x = cy;
+                    cy += origH[bestPerm[i]];
+                }
+            }
+
+            bool isIdentity = true;
+            for (int i = 0; i < stripLen; ++i)
+                if (bestPerm[i] != i)
+                {
+                    isIdentity = false;
+                    break;
+                }
+
+            if (!isIdentity && bestScore > baseScore)
+            {
+                ++stripsImproved;
+                if ((int)ctx.placementIdGrid.size() >= gridW * gridH)
+                    StampPlacementCells(ctx.placementIdGrid, placements, gridW, stripIdx, stripLen);
+            }
+        }
+    }
+
+    if (outStripsFound) *outStripsFound = stripsFound;
+    if (outStripsImproved) *outStripsImproved = stripsImproved;
+}
+
+// Swap a single placement X with a rectangular union of multiple placements G
+// elsewhere. Same-orientation cases translate G en masse into X's old footprint
+// (tiling trivially preserved). Rotated cases run a corner-first backtracking
+// tiler over the destination rectangle; at k ≤ 10 pieces this outperforms DLX
+// (no sparse-matrix setup). Cell occupancy preserved by construction.
+
+namespace
+{
+struct TileItem
+{
+    int placementIdx; // index into outer placements[] (group member)
+    int w;
+    int h;
+    int rotw; // placed w (may equal h if rotated)
+    int roth;
+    int destX; // destination top-left in X's old footprint
+    int destY;
+    bool canRotate;
+    bool placed;
+};
+
+struct TileCtx
+{
+    int regionW;
+    int regionH;
+    unsigned char* filled; // regionW*regionH, 1 = covered
+    TileItem* pieces;
+    int numPieces;
+};
+
+bool TileBacktrack(TileCtx& tc)
+{
+    // Find top-left empty cell. Row-major scan; row 0 = min y in region frame.
+    int cx = -1, cy = -1;
+    for (int ry = 0; ry < tc.regionH && cx < 0; ++ry)
+    {
+        for (int rx = 0; rx < tc.regionW; ++rx)
+        {
+            if (!tc.filled[ry * tc.regionW + rx])
+            {
+                cx = rx;
+                cy = ry;
+                break;
+            }
+        }
+    }
+    if (cx < 0) return true; // fully covered
+
+    for (int i = 0; i < tc.numPieces; ++i)
+    {
+        if (tc.pieces[i].placed) continue;
+        // Try up to two orientations.
+        int orients[2][2];
+        int numOri    = 1;
+        orients[0][0] = tc.pieces[i].w;
+        orients[0][1] = tc.pieces[i].h;
+        if (tc.pieces[i].canRotate && tc.pieces[i].w != tc.pieces[i].h)
+        {
+            orients[1][0] = tc.pieces[i].h;
+            orients[1][1] = tc.pieces[i].w;
+            numOri        = 2;
+        }
+
+        for (int oi = 0; oi < numOri; ++oi)
+        {
+            int pw = orients[oi][0];
+            int ph = orients[oi][1];
+            if (cx + pw > tc.regionW || cy + ph > tc.regionH) continue;
+
+            // Test all cells free.
+            bool ok = true;
+            for (int dy = 0; dy < ph && ok; ++dy)
+            {
+                int rowOff = (cy + dy) * tc.regionW;
+                for (int dx = 0; dx < pw; ++dx)
+                {
+                    if (tc.filled[rowOff + (cx + dx)])
+                    {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            if (!ok) continue;
+
+            // Commit + recurse.
+            for (int dy = 0; dy < ph; ++dy)
+            {
+                int rowOff = (cy + dy) * tc.regionW;
+                for (int dx = 0; dx < pw; ++dx)
+                    tc.filled[rowOff + (cx + dx)] = 1;
+            }
+            tc.pieces[i].placed = true;
+            tc.pieces[i].rotw   = pw;
+            tc.pieces[i].roth   = ph;
+            tc.pieces[i].destX  = cx;
+            tc.pieces[i].destY  = cy;
+
+            if (TileBacktrack(tc)) return true;
+
+            // Undo.
+            for (int dy = 0; dy < ph; ++dy)
+            {
+                int rowOff = (cy + dy) * tc.regionW;
+                for (int dx = 0; dx < pw; ++dx)
+                    tc.filled[rowOff + (cx + dx)] = 0;
+            }
+            tc.pieces[i].placed = false;
+        }
+    }
+    return false;
+}
+} // namespace
+
+void Packer::TileSwap(std::vector<Placement>& placements, const std::vector<Item>& items, PackContext& ctx, int gridW,
+                      int gridH, int groupingPowerQuarters, int* outCandidatesFound, int* outCandidatesCommitted)
+{
+    int n = (int)placements.size();
+    if (n <= 1 || n > 256) return;
+    if ((int)ctx.placementIdGrid.size() < gridW * gridH) return;
+
+    int candFound     = 0;
+    int candCommitted = 0;
+
+    AdjGraph g;
+    BuildAdjGraph(g, placements);
+    long long curScore = ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
+
+    // For each placement X, try to find a rectangular region R elsewhere on
+    // the grid with X's footprint (or rotated) such that R is covered
+    // exactly by placements other than X.
+    for (int xi = 0; xi < (int)placements.size(); ++xi)
+    {
+        const Placement& xp = placements[xi];
+        bool tryRotations   = items[xp.id].canRotate && xp.w != xp.h;
+
+        for (int ori = 0; ori < (tryRotations ? 2 : 1); ++ori)
+        {
+            int tw = (ori == 0) ? xp.w : xp.h;
+            int th = (ori == 0) ? xp.h : xp.w;
+
+            for (int ty = 0; ty + th <= gridH; ++ty)
+            {
+                for (int tx = 0; tx + tw <= gridW; ++tx)
+                {
+                    if (tx == xp.x && ty == xp.y && ori == 0) continue; // identity
+
+                    // Collect placement ids covering R.
+                    int members[64];
+                    int numMembers = 0;
+                    bool allFilled = true;
+                    bool containsX = false;
+                    bool bleeds    = false;
+
+                    for (int dy = 0; dy < th && !bleeds; ++dy)
+                    {
+                        int rowOff = (ty + dy) * gridW;
+                        for (int dx = 0; dx < tw; ++dx)
+                        {
+                            int pidx = ctx.placementIdGrid[rowOff + (tx + dx)];
+                            if (pidx < 0)
+                            {
+                                allFilled = false;
+                                bleeds    = true;
+                                break;
+                            }
+                            if (pidx == xi)
+                            {
+                                containsX = true;
+                                bleeds    = true;
+                                break;
+                            }
+                            bool seen = false;
+                            for (int k = 0; k < numMembers; ++k)
+                                if (members[k] == pidx)
+                                {
+                                    seen = true;
+                                    break;
+                                }
+                            if (!seen)
+                            {
+                                if (numMembers >= 64)
+                                {
+                                    bleeds = true;
+                                    break;
+                                }
+                                members[numMembers++] = pidx;
+                            }
+                        }
+                    }
+                    if (!allFilled || containsX || bleeds) continue;
+                    if (numMembers < 2) continue;
+
+                    // Verify each member lies fully inside R.
+                    bool memberBleeds = false;
+                    for (int k = 0; k < numMembers && !memberBleeds; ++k)
+                    {
+                        const Placement& mp = placements[members[k]];
+                        if (mp.x < tx || mp.y < ty || mp.x + mp.w > tx + tw || mp.y + mp.h > ty + th)
+                            memberBleeds = true;
+                    }
+                    if (memberBleeds) continue;
+
+                    // Verify the member footprints fit into X's old spot.
+                    // Same-orientation case is trivial (R and X share dims).
+                    // Rotated case needs the backtracking tiler on an
+                    // X.w * X.h region.
+                    int destW = xp.w;
+                    int destH = xp.h;
+
+                    TileItem pieces[64];
+                    for (int k = 0; k < numMembers; ++k)
+                    {
+                        const Placement& mp    = placements[members[k]];
+                        pieces[k].placementIdx = members[k];
+                        pieces[k].w            = mp.w;
+                        pieces[k].h            = mp.h;
+                        pieces[k].canRotate    = items[mp.id].canRotate;
+                        pieces[k].rotw         = mp.w;
+                        pieces[k].roth         = mp.h;
+                        pieces[k].destX        = mp.x - tx;
+                        pieces[k].destY        = mp.y - ty;
+                        pieces[k].placed       = false;
+                    }
+
+                    bool tilingOk = false;
+                    if (ori == 0)
+                    {
+                        // Translate G verbatim — original tiling is still valid.
+                        for (int k = 0; k < numMembers; ++k)
+                        {
+                            pieces[k].rotw = pieces[k].w;
+                            pieces[k].roth = pieces[k].h;
+                            // destX/destY already set to offsets inside R.
+                        }
+                        tilingOk = true;
+                    }
+                    else
+                    {
+                        // Rotated — run the backtracker.
+                        unsigned char filled[32 * 32];
+                        if (destW * destH > 32 * 32) continue;
+                        std::memset(filled, 0, (size_t)destW * (size_t)destH);
+                        TileCtx tc;
+                        tc.regionW   = destW;
+                        tc.regionH   = destH;
+                        tc.filled    = filled;
+                        tc.pieces    = pieces;
+                        tc.numPieces = numMembers;
+                        tilingOk     = TileBacktrack(tc);
+                    }
+                    if (!tilingOk) continue;
+
+                    ++candFound;
+
+                    // Build hypothetical placements by mutating then scoring then reverting.
+                    // Save originals for X and each member.
+                    Placement savedX = xp;
+                    Placement savedMembers[64];
+                    for (int k = 0; k < numMembers; ++k)
+                        savedMembers[k] = placements[members[k]];
+
+                    // Apply swap: X moves to (tx, ty) with its original dims; members
+                    // move to X's old position with their (rotw, roth, destX, destY).
+                    placements[xi].x       = tx;
+                    placements[xi].y       = ty;
+                    placements[xi].w       = tw;
+                    placements[xi].h       = th;
+                    placements[xi].rotated = (tw != items[xp.id].w);
+
+                    for (int k = 0; k < numMembers; ++k)
+                    {
+                        Placement& mp = placements[members[k]];
+                        mp.x          = savedX.x + pieces[k].destX;
+                        mp.y          = savedX.y + pieces[k].destY;
+                        mp.w          = pieces[k].rotw;
+                        mp.h          = pieces[k].roth;
+                        mp.rotated    = (pieces[k].rotw != items[mp.id].w);
+                    }
+
+                    BuildAdjGraph(g, placements);
+                    long long newScore = ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
+
+                    if (newScore > curScore)
+                    {
+                        // Commit: update placementIdGrid for R and X's old footprint.
+                        // Clear old cells of X and all members; stamp new ones.
+                        for (int dy = 0; dy < th; ++dy)
+                        {
+                            int rowOff = (ty + dy) * gridW;
+                            for (int dx = 0; dx < tw; ++dx)
+                                ctx.placementIdGrid[rowOff + (tx + dx)] = xi;
+                        }
+                        int memberList[64];
+                        for (int k = 0; k < numMembers; ++k)
+                            memberList[k] = members[k];
+                        StampPlacementCells(ctx.placementIdGrid, placements, gridW, memberList, numMembers);
+
+                        curScore = newScore;
+                        ++candCommitted;
+                    }
+                    else
+                    {
+                        // Revert.
+                        placements[xi] = savedX;
+                        for (int k = 0; k < numMembers; ++k)
+                            placements[members[k]] = savedMembers[k];
+                    }
+                }
+            }
+        }
+    }
+
+    if (outCandidatesFound) *outCandidatesFound = candFound;
+    if (outCandidatesCommitted) *outCandidatesCommitted = candCommitted;
+}
+
 bool Packer::ValidatePlacements(int gridW, int gridH, const std::vector<Placement>& placements)
 {
     std::vector<unsigned char> grid((size_t)gridW * (size_t)gridH, 0);

@@ -283,6 +283,10 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     bool enableRepairMove            = !(params && params->enableRepairMove == 0);
     bool enablePreReservation        = !(params && params->enablePreReservation == 0);
 
+    // StripShift/TileSwap run by default; pass 0 in SearchParams to ablate off.
+    bool enableStripShift = !(params && params->enableStripShift == 0);
+    bool enableTileSwap   = !(params && params->enableTileSwap == 0);
+
     // Move-weight thresholds. -1 = default.
     int effSwapMax   = (params && params->moveSwapMax >= 0) ? params->moveSwapMax : MOVE_SWAP_MAX;
     int effInsertMax = (params && params->moveInsertMax >= 0) ? params->moveInsertMax : MOVE_INSERT_MAX;
@@ -374,6 +378,8 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     unsigned long long profGreedySeed            = 0;
     unsigned long long profUnconstrainedFallback = 0;
     unsigned long long profOptimizeGrouping      = 0;
+    unsigned long long profStripShift            = 0;
+    unsigned long long profTileSwap              = 0;
     unsigned long long profBordersRaw            = 0;
 
     long long diagKeptPrefixSum = 0;
@@ -1019,6 +1025,23 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     }
     PROF_PHASE_END(unc, profUnconstrainedFallback);
 
+    int diagStripShiftStripsFound       = 0;
+    int diagStripShiftStripsImproved    = 0;
+    int diagTileSwapCandidatesFound     = 0;
+    int diagTileSwapCandidatesCommitted = 0;
+
+    PROF_PHASE_BEGIN(stripShift);
+    if (enableStripShift)
+        StripShift(ctx.bestPl, items, ctx, gridW, gridH, effGroupingPower, &diagStripShiftStripsFound,
+                   &diagStripShiftStripsImproved);
+    PROF_PHASE_END(stripShift, profStripShift);
+
+    PROF_PHASE_BEGIN(tileSwap);
+    if (enableTileSwap)
+        TileSwap(ctx.bestPl, items, ctx, gridW, gridH, effGroupingPower, &diagTileSwapCandidatesFound,
+                 &diagTileSwapCandidatesCommitted);
+    PROF_PHASE_END(tileSwap, profTileSwap);
+
     PROF_PHASE_BEGIN(optGrp);
     if (enableOptimizeGrouping) OptimizeGrouping(ctx.bestPl, items, ctx, effGroupingPower);
     PROF_PHASE_END(optGrp, profOptimizeGrouping);
@@ -1047,20 +1070,24 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
 
     if (outDiag)
     {
-        outDiag->packCalls                = diagPackCalls;
-        outDiag->plateauBreaks            = diagPlateauBreaks;
-        outDiag->lahcItersExecuted        = diagLahcItersExecuted;
-        outDiag->bestFoundIter            = diagBestFoundIter;
-        outDiag->bestFoundRestart         = diagBestFoundRestart;
-        outDiag->unconstrainedFallbackWon = diagUnconstrainedFallbackWon;
-        outDiag->greedySeedScore          = diagGreedySeedScore;
-        outDiag->greedySeedLerArea        = diagGreedySeedLerArea;
-        outDiag->repairMoveRolls          = diagRepairMoveRolls;
-        outDiag->repairMoveScans          = diagRepairMoveScans;
-        outDiag->repairMoveHits           = diagRepairMoveHits;
-        outDiag->repairMoveAccepts        = diagRepairMoveAccepts;
-        outDiag->skylineSnapHits          = diagSkylineSnapHits;
-        outDiag->skylineSnapProbes        = diagSkylineSnapProbes;
+        outDiag->packCalls                   = diagPackCalls;
+        outDiag->plateauBreaks               = diagPlateauBreaks;
+        outDiag->lahcItersExecuted           = diagLahcItersExecuted;
+        outDiag->bestFoundIter               = diagBestFoundIter;
+        outDiag->bestFoundRestart            = diagBestFoundRestart;
+        outDiag->unconstrainedFallbackWon    = diagUnconstrainedFallbackWon;
+        outDiag->greedySeedScore             = diagGreedySeedScore;
+        outDiag->greedySeedLerArea           = diagGreedySeedLerArea;
+        outDiag->repairMoveRolls             = diagRepairMoveRolls;
+        outDiag->repairMoveScans             = diagRepairMoveScans;
+        outDiag->repairMoveHits              = diagRepairMoveHits;
+        outDiag->repairMoveAccepts           = diagRepairMoveAccepts;
+        outDiag->stripShiftStripsFound       = diagStripShiftStripsFound;
+        outDiag->stripShiftStripsImproved    = diagStripShiftStripsImproved;
+        outDiag->tileSwapCandidatesFound     = diagTileSwapCandidatesFound;
+        outDiag->tileSwapCandidatesCommitted = diagTileSwapCandidatesCommitted;
+        outDiag->skylineSnapHits             = diagSkylineSnapHits;
+        outDiag->skylineSnapProbes           = diagSkylineSnapProbes;
         // Power-independent clustering metric for cross-power CSV/analysis.
         // Computed once per final result, not per LAHC iter.
         PROF_PHASE_BEGIN(bordersRaw);
@@ -1080,6 +1107,8 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         outDiag->profCyclesGreedySeed            = (long long)profGreedySeed;
         outDiag->profCyclesUnconstrainedFallback = (long long)profUnconstrainedFallback;
         outDiag->profCyclesOptimizeGrouping      = (long long)profOptimizeGrouping;
+        outDiag->profCyclesStripShift            = (long long)profStripShift;
+        outDiag->profCyclesTileSwap              = (long long)profTileSwap;
         outDiag->profCyclesBordersRaw            = (long long)profBordersRaw;
         outDiag->keptPrefixSum                   = diagKeptPrefixSum;
         outDiag->keptPrefixCount                 = diagKeptPrefixCount;

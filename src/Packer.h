@@ -138,6 +138,12 @@ class Packer
         int enableRepairMove;
         int enablePreReservation;
 
+        // Post-pack geometric moves. Default on; pass 0 in SearchParams to
+        // ablate off. Both preserve cell occupancy so LER/concentration/
+        // stranded are invariant — only the grouping bonus can change.
+        int enableStripShift; // permute items within same-(x,w) or same-(y,h) strips
+        int enableTileSwap;   // swap a single placement with a multi-placement rectangle
+
         // Move-type thresholds on a 0..100 roll. Must satisfy
         // moveSwapMax <= moveInsertMax <= moveRotateMax <= 100. -1 = default.
         int moveSwapMax;
@@ -176,10 +182,11 @@ class Packer
         SearchParams()
             : numRestarts(-1), itersPerRestart(-1), lahcHistoryLen(-1), plateauThreshold(-1), rngSeed(0),
               enableBafSeed(-1), enableUnconstrainedFallback(-1), enableOptimizeGrouping(-1), enableFastConverge(-1),
-              enableRepairMove(-1), enablePreReservation(-1), moveSwapMax(-1), moveInsertMax(-1), moveRotateMax(-1),
-              scoringGroupingWeight(-1), scoringFragWeight(-1), groupingPowerQuarters(-1), skylineWasteCoef(-1),
-              tierWeightExact(-1), tierWeightCustom(-1), tierWeightType(-1), tierWeightFunction(-1),
-              tierWeightFlags(-1), funcSimFoodFoodRestricted(-1), funcSimFirstaidRobotrepair(-1), softGroupingPct(-1)
+              enableRepairMove(-1), enablePreReservation(-1), enableStripShift(-1), enableTileSwap(-1), moveSwapMax(-1),
+              moveInsertMax(-1), moveRotateMax(-1), scoringGroupingWeight(-1), scoringFragWeight(-1),
+              groupingPowerQuarters(-1), skylineWasteCoef(-1), tierWeightExact(-1), tierWeightCustom(-1),
+              tierWeightType(-1), tierWeightFunction(-1), tierWeightFlags(-1), funcSimFoodFoodRestricted(-1),
+              funcSimFirstaidRobotrepair(-1), softGroupingPct(-1)
         {
         }
 
@@ -212,6 +219,13 @@ class Packer
         int repairMoveScans;
         int repairMoveHits;
         int repairMoveAccepts;
+
+        // StripShift/TileSwap post-pack move diagnostics. Zero when the
+        // corresponding feature flag is off.
+        int stripShiftStripsFound;       // contiguous strip runs of length >= 2
+        int stripShiftStripsImproved;    // strips where a non-identity perm won
+        int tileSwapCandidatesFound;     // (X, R, G) triples that passed feasibility
+        int tileSwapCandidatesCommitted; // candidates that improved grouping
 
         // Power-independent clustering metric: Σ b per same-type connected
         // component on the final placement (no power exponent applied). The
@@ -248,6 +262,8 @@ class Packer
         long long profCyclesGreedySeed;            // BSSF + optional BAF + selection
         long long profCyclesUnconstrainedFallback; // optional fallback PackH + rescore
         long long profCyclesOptimizeGrouping;      // post-LAHC same-footprint swap
+        long long profCyclesStripShift;            // post-LAHC strip permutation
+        long long profCyclesTileSwap;              // post-LAHC multi-placement swap
         long long profCyclesBordersRaw;            // final cross-power clustering metric
 
         // Sum/count instead of pre-computed rate so the harness can
@@ -276,17 +292,18 @@ class Packer
         PackDiagnostics()
             : bestFoundIter(0), bestFoundRestart(0), plateauBreaks(0), lahcItersExecuted(0), packCalls(0),
               unconstrainedFallbackWon(false), greedySeedScore(0), greedySeedLerArea(0), repairMoveRolls(0),
-              repairMoveScans(0), repairMoveHits(0), repairMoveAccepts(0), groupingBordersRaw(0), groupingBonusExact(0),
-              skylineSnapHits(0), skylineSnapProbes(0)
+              repairMoveScans(0), repairMoveHits(0), repairMoveAccepts(0), stripShiftStripsFound(0),
+              stripShiftStripsImproved(0), tileSwapCandidatesFound(0), tileSwapCandidatesCommitted(0),
+              groupingBordersRaw(0), groupingBonusExact(0), skylineSnapHits(0), skylineSnapProbes(0)
 #ifdef STACKSORT_PROFILE
               ,
               profCyclesMoveGen(0), profCyclesSkylinePack(0), profCyclesLer(0), profCyclesConcentration(0),
               profCyclesGrouping(0), profCyclesStranded(0), profCyclesScore(0), profCyclesAccept(0),
               profCyclesPreReservation(0), profCyclesGreedySeed(0), profCyclesUnconstrainedFallback(0),
-              profCyclesOptimizeGrouping(0), profCyclesBordersRaw(0), keptPrefixSum(0), keptPrefixCount(0),
-              gridHashProbes(0), gridHashHits(0), profCyclesSkylinePrefix(0), profCyclesSkylineWasteMap(0),
-              profCyclesSkylineCandidate(0), profCyclesSkylineAdjacency(0), profCyclesSkylineCommit(0),
-              profCyclesLerHistogram(0), profCyclesLerStack(0)
+              profCyclesOptimizeGrouping(0), profCyclesStripShift(0), profCyclesTileSwap(0), profCyclesBordersRaw(0),
+              keptPrefixSum(0), keptPrefixCount(0), gridHashProbes(0), gridHashHits(0), profCyclesSkylinePrefix(0),
+              profCyclesSkylineWasteMap(0), profCyclesSkylineCandidate(0), profCyclesSkylineAdjacency(0),
+              profCyclesSkylineCommit(0), profCyclesLerHistogram(0), profCyclesLerStack(0)
 #endif
         {
         }
@@ -590,6 +607,21 @@ class Packer
     // grouping. Physical layout is unchanged since occupied cells are identical.
     static void OptimizeGrouping(std::vector<Placement>& placements, const std::vector<Item>& items,
                                  const PackContext& ctx, int groupingPowerQuarters);
+
+    // Post-process: permute items within strips (contiguous runs of same-(x,w)
+    // or same-(y,h) placements). Cell occupancy preserved (strip footprint
+    // unchanged). Updates placementIdGrid when committing a non-identity perm.
+    static void StripShift(std::vector<Placement>& placements, const std::vector<Item>& items, PackContext& ctx,
+                           int gridW, int gridH, int groupingPowerQuarters, int* outStripsFound = NULL,
+                           int* outStripsImproved = NULL);
+
+    // Post-process: swap a single placement X with a rectangular union of
+    // multiple placements G elsewhere. Cell occupancy preserved (both regions
+    // share the same footprint). For rotated swaps, verifies G can tile X's
+    // destination via corner-first backtracking.
+    static void TileSwap(std::vector<Placement>& placements, const std::vector<Item>& items, PackContext& ctx,
+                         int gridW, int gridH, int groupingPowerQuarters, int* outCandidatesFound = NULL,
+                         int* outCandidatesCommitted = NULL);
 
     // Count rotated placements (shared between PackH and PackAnnealedH).
     static int CountRotated(const std::vector<Placement>& placements);

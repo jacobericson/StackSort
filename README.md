@@ -90,7 +90,7 @@ The packer runs a 5-layer pipeline, then a query-time selection over its cached 
 2. **LAHC search** (Late Acceptance Hill Climbing) explores item orderings to find better layouts
 3. **Diversified moves** (swap, insert, rotate-flip, repair) perturb the ordering
 4. **Multi-restart** (16 restarts first pass, 20 refinement) escapes local optima
-5. **Post-packing grouping swap** exchanges same-footprint items across types to improve clustering
+5. **Post-packing grouping moves** rearrange items to improve clustering without changing which cells are occupied — permuting items within aligned strips, swapping a single large item with a rectangular group of smaller items, and exchanging same-footprint items across types
 
 At click time, **best-across-target** selects the highest-scoring cached result whose LER side covers the requested target — so later clicks are served from a single lookup rather than rerunning the pipeline.
 

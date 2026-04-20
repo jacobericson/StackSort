@@ -169,6 +169,8 @@ bool ParseConfigFile(const std::string& filePath, const Packer::SearchParams& ba
             else if (key == "enable_fast_converge") out.params.enableFastConverge = flag;
             else if (key == "enable_pre_reservation") out.params.enablePreReservation = flag;
             else if (key == "enable_repair_move") out.params.enableRepairMove = flag;
+            else if (key == "enable_strip_shift") out.params.enableStripShift = flag;
+            else if (key == "enable_tile_swap") out.params.enableTileSwap = flag;
         }
         else if (section == "scoring")
         {
