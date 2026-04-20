@@ -6,20 +6,20 @@ repos:
         types_or: [c, c++]
         files: ^(src|tests/harness)/.*\.(cpp|h)$
 
-  # Advisory clang-tidy: prints findings but does not block commits.
-  # WarningsAsErrors: '' in tests/harness/.clang-tidy keeps findings non-fatal.
-  # Scoped to files that appear in tests/harness/compile_commands.json — other
-  # src/ files (StackSort.cpp, SortWorker.cpp, etc.) need KenshiLib/MyGUI
-  # headers to parse, which aren't on the harness clang-tidy setup.
+  # Blocking clang-tidy: WarningsAsErrors='*' in tests/harness/.clang-tidy
+  # turns any finding into a commit blocker. Scoped to files that appear in
+  # tests/harness/compile_commands.json — other src/ files (StackSort.cpp,
+  # SortWorker.cpp, etc.) need KenshiLib/MyGUI headers to parse, which aren't
+  # on the harness clang-tidy setup.
   # Requires a one-time 'python tests/harness/gen_compile_commands.py' on fresh
   # clones to produce the compilation database.
   - repo: local
     hooks:
       - id: clang-tidy
-        name: clang-tidy (advisory)
+        name: clang-tidy
         entry: clang-tidy -p tests/harness --config-file=tests/harness/.clang-tidy --quiet
         language: system
         types_or: [c, c++]
         files: ^(src/Packer.*|tests/harness/.*)\.(cpp|h)$
         require_serial: true
-        verbose: true    # always show findings even when hook passes
+        verbose: true    # surface findings even on pass

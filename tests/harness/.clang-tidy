@@ -28,8 +28,9 @@ Checks: >
   -misc-const-correctness,
   -misc-use-anonymous-namespace,
   -misc-use-internal-linkage,
+  -misc-no-recursion,
   -performance-enum-size
 
-WarningsAsErrors: ''
+WarningsAsErrors: '*'
 HeaderFilterRegex: '(tests/harness|src/Packer).*'
 FormatStyle: file
