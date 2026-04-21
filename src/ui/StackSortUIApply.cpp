@@ -148,7 +148,8 @@ void StackSortUI::ApplySort(InventoryGUI* gui, int target, int& outAppliedLerSid
         // Compute before-sort LER for comparison
         std::vector<unsigned char> beforeGrid = snapshotOccupancyGrid(section);
         int beforeLerArea = 0, beforeLerW = 0, beforeLerH = 0, beforeLerX = 0, beforeLerY = 0;
-        Packer::ComputeLER(beforeGrid, gridW, gridH, beforeLerArea, beforeLerW, beforeLerH, beforeLerX, beforeLerY);
+        Packer::Ler::ComputeLER(beforeGrid, gridW, gridH, beforeLerArea, beforeLerW, beforeLerH, beforeLerX,
+                                beforeLerY);
 
         // Try best precomputed result across all target values
         int sourceTarget = 0;
@@ -159,7 +160,7 @@ void StackSortUI::ApplySort(InventoryGUI* gui, int target, int& outAppliedLerSid
         {
             std::vector<Item*> ptrs;
             if (SortWorker::GetItemPtrs(section, ptrs) && ptrs.size() == precomputed.placements.size() &&
-                Packer::ValidatePlacements(gridW, gridH, precomputed.placements))
+                Packer::Grid::ValidatePlacements(gridW, gridH, precomputed.placements))
             {
                 std::string tStr = std::string("[") + dimTag + "] target=" + IntToStr(clamped);
                 if (sourceTarget != clamped) tStr += " (via target=" + IntToStr(sourceTarget) + ")";
@@ -217,7 +218,7 @@ void StackSortUI::ApplySort(InventoryGUI* gui, int target, int& outAppliedLerSid
 
         QueryPerformanceCounter(&t0);
         Packer::Result result =
-            Packer::PackAnnealed(gridW, gridH, packItems, dim, clamped, NULL, NULL, NULL, 0, &syncParams);
+            Packer::Search::PackAnnealed(gridW, gridH, packItems, dim, clamped, NULL, NULL, NULL, 0, &syncParams);
         QueryPerformanceCounter(&t1);
 
         double ms = (double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart * 1000.0;
@@ -230,7 +231,7 @@ void StackSortUI::ApplySort(InventoryGUI* gui, int target, int& outAppliedLerSid
             continue;
         }
 
-        if (!Packer::ValidatePlacements(gridW, gridH, result.placements))
+        if (!Packer::Grid::ValidatePlacements(gridW, gridH, result.placements))
         {
             LogError("[StackSort] Placement validation failed, vanilla fallback");
             section->_NV_autoArrange();

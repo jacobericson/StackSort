@@ -4,6 +4,12 @@
 
 #include <algorithm>
 
+namespace Packer
+{
+
+namespace Scoring
+{
+
 // Integer square root via Newton's method (no <cmath> dependency).
 static inline int isqrt(int n)
 {
@@ -63,7 +69,7 @@ static inline long long applyGroupingPower(int b, int quarters)
 // 0..100 multiplier on the function tier. -1 on either side disables; equal
 // returns 100; hardcoded cross-function pairs pull their value from ctx so
 // ablation can zero them.
-static inline int FunctionSimilarityPct(int funcA, int funcB, const Packer::PackContext& ctx)
+static inline int FunctionSimilarityPct(int funcA, int funcB, const PackContext& ctx)
 {
     if (funcA < 0 || funcB < 0) return 0;
     if (funcA == funcB) return 100;
@@ -80,7 +86,7 @@ static inline int FunctionSimilarityPct(int funcA, int funcB, const Packer::Pack
 // Max weight (0..100) across tiers where a and b match. Function tier is
 // pre-multiplied by FunctionSimilarityPct so partial cross-function matches
 // contribute less than same-function. Short-circuits on a 100-weight exact match.
-static inline int PairWeight(const Packer::Item& a, const Packer::Item& b, const Packer::PackContext& ctx)
+static inline int PairWeight(const Item& a, const Item& b, const PackContext& ctx)
 {
     int best = 0;
 
@@ -126,12 +132,17 @@ static inline void uf_unite(int* parent, int a, int b)
     if (a != b) parent[a] = b;
 }
 
+} // namespace Scoring
+
+namespace Geometry
+{
+
 // Corner filter suppresses 1-cell borders on large items (side > 2) so trivial
 // corner-touches don't register as clustering. Flush bonus rewards full-side
 // contact (the stronger hand-arranged-looking case).
 static const int SHARED_BORDER_FLUSH_BONUS = 1;
 
-inline int Packer::SharedBorder(const Placement& a, const Placement& b)
+inline int SharedBorder(const Placement& a, const Placement& b)
 {
     // AABB early-out: if one rect's left edge is past the other's right edge
     // (or symmetric in y), the pair can't share a border. Strict > so
@@ -173,3 +184,7 @@ inline int Packer::SharedBorder(const Placement& a, const Placement& b)
 
     return total;
 }
+
+} // namespace Geometry
+
+} // namespace Packer

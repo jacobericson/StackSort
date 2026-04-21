@@ -4,6 +4,12 @@
 
 #include <vector>
 
+namespace Packer
+{
+
+namespace PostPack
+{
+
 // Rewrite placementIdGrid for a set of placement indices. The cells those
 // placements covered in their *old* positions should already have been
 // overwritten by their new positions elsewhere in the same batch — callers use
@@ -12,14 +18,13 @@
 // resync placementIdGrid after moving placements without rebuilding from
 // scratch.
 
-static inline void StampPlacementCells(std::vector<int>& placementIdGrid,
-                                       const std::vector<Packer::Placement>& placements, int gridW, const int* indices,
-                                       int count)
+static inline void StampPlacementCells(std::vector<int>& placementIdGrid, const std::vector<Placement>& placements,
+                                       int gridW, const int* indices, int count)
 {
     for (int k = 0; k < count; ++k)
     {
-        int idx                    = indices[k];
-        const Packer::Placement& p = placements[idx];
+        int idx            = indices[k];
+        const Placement& p = placements[idx];
         for (int dy = 0; dy < p.h; ++dy)
         {
             int rowOffset = (p.y + dy) * gridW;
@@ -28,3 +33,7 @@ static inline void StampPlacementCells(std::vector<int>& placementIdGrid,
         }
     }
 }
+
+} // namespace PostPack
+
+} // namespace Packer

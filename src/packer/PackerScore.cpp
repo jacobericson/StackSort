@@ -2,6 +2,9 @@
 
 #include <vector>
 
+namespace Packer
+{
+
 // Scoring constants -- strict tier separation in ComputeScore.
 // Each tier's max contribution < the next tier's minimum nonzero delta,
 // so lower-priority metrics never override higher ones.
@@ -12,11 +15,13 @@
 // the harness can ablate them via SearchParams overrides. Defaults live in
 // Packer.h as DEFAULT_FRAG_WEIGHT / DEFAULT_GROUPING_WEIGHT.
 
+namespace Scoring
+{
+
 static const int ROTATION_PENALTY = 1;
 
-long long Packer::ComputeScore(size_t numPlaced, int lerArea, int lerHeight, double concentration, int target,
-                               int numRotated, long long groupingBonus, int strandedCells, int groupingWeight,
-                               int fragWeight)
+long long ComputeScore(size_t numPlaced, int lerArea, int lerHeight, double concentration, int target, int numRotated,
+                       long long groupingBonus, int strandedCells, int groupingWeight, int fragWeight)
 {
     long long score = (long long)numPlaced * 1000000LL;
     score += (long long)lerArea * (long long)lerArea;
@@ -35,7 +40,12 @@ long long Packer::ComputeScore(size_t numPlaced, int lerArea, int lerHeight, dou
     return score;
 }
 
-bool Packer::ValidatePlacements(int gridW, int gridH, const std::vector<Placement>& placements)
+} // namespace Scoring
+
+namespace Grid
+{
+
+bool ValidatePlacements(int gridW, int gridH, const std::vector<Placement>& placements)
 {
     std::vector<unsigned char> grid((size_t)gridW * (size_t)gridH, 0);
 
@@ -58,3 +68,7 @@ bool Packer::ValidatePlacements(int gridW, int gridH, const std::vector<Placemen
 
     return true;
 }
+
+} // namespace Grid
+
+} // namespace Packer

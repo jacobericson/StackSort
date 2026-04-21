@@ -1,8 +1,13 @@
 #include "Packer.h"
 
-bool Packer::GridCacheLookup(PackContext& ctx, int gridW, int gridH, int& outLerArea, int& outLerWidth,
-                             int& outLerHeight, int& outLerX, int& outLerY, double& outConcentration,
-                             int& outStrandedCells)
+namespace Packer
+{
+
+namespace Cache
+{
+
+bool GridCacheLookup(PackContext& ctx, int gridW, int gridH, int& outLerArea, int& outLerWidth, int& outLerHeight,
+                     int& outLerX, int& outLerY, double& outConcentration, int& outStrandedCells)
 {
     unsigned long long hA       = ctx.cache.curHashA;
     unsigned long long hB       = ctx.cache.curHashB;
@@ -25,10 +30,10 @@ bool Packer::GridCacheLookup(PackContext& ctx, int gridW, int gridH, int& outLer
         return true;
     }
 
-    ComputeLERCtx(ctx, curPtr, gridW, gridH, outLerArea, outLerWidth, outLerHeight, outLerX, outLerY);
+    Ler::ComputeLERCtx(ctx, curPtr, gridW, gridH, outLerArea, outLerWidth, outLerHeight, outLerX, outLerY);
     outStrandedCells = 0;
-    outConcentration = ComputeConcentrationAndStrandedCtx(ctx, gridW, gridH, outLerX, outLerY, outLerWidth,
-                                                          outLerHeight, outStrandedCells);
+    outConcentration = Ler::ComputeConcentrationAndStrandedCtx(ctx, gridW, gridH, outLerX, outLerY, outLerWidth,
+                                                               outLerHeight, outStrandedCells);
 
     int slot            = ctx.cache.ringHead;
     GridCacheEntry& dst = ctx.cache.entries[slot];
@@ -46,3 +51,7 @@ bool Packer::GridCacheLookup(PackContext& ctx, int gridW, int gridH, int& outLer
 
     return false;
 }
+
+} // namespace Cache
+
+} // namespace Packer

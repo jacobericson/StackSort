@@ -5,11 +5,20 @@
 #include <climits>
 #include <cstring>
 
+namespace Packer
+{
+
+namespace Heuristics
+{
+
+namespace
+{
+
 // Maximum adjacent same-type placements to track per candidate position.
 // Bounded by the number of items that can physically touch a single item.
-static const int MAX_ADJ = 16;
+const int MAX_ADJ = 16;
 
-static short SkylineAllocNode(Packer::PackContext& ctx)
+short SkylineAllocNode(PackContext& ctx)
 {
     short idx;
     if (ctx.skyline.freeHead >= 0)
@@ -25,13 +34,13 @@ static short SkylineAllocNode(Packer::PackContext& ctx)
     return idx;
 }
 
-static void SkylineFreeNode(Packer::PackContext& ctx, short idx)
+void SkylineFreeNode(PackContext& ctx, short idx)
 {
     ctx.skyline.next[idx] = ctx.skyline.freeHead;
     ctx.skyline.freeHead  = idx;
 }
 
-static void SkylineReset(Packer::PackContext& ctx, int gridW)
+void SkylineReset(PackContext& ctx, int gridW)
 {
     ctx.skyline.head              = -1;
     ctx.skyline.freeHead          = -1;
@@ -49,10 +58,9 @@ static void SkylineReset(Packer::PackContext& ctx, int gridW)
 // placementIdGrid, so EmitBoundary only copies the already-current state.
 // placeX/placeY/placeW/placeH are retained in the signature for call-site
 // clarity but are unused here.
-static void EmitBoundary(Packer::PackContext& ctx, int /*gridW*/, int /*placeX*/, int /*placeY*/, int /*placeW*/,
-                         int /*placeH*/)
+void EmitBoundary(PackContext& ctx, int /*gridW*/, int /*placeX*/, int /*placeY*/, int /*placeW*/, int /*placeH*/)
 {
-    Packer::SkylineBoundary b;
+    SkylineBoundary b;
     b.placementsCount = (int)ctx.placements.size();
     b.wasteStart      = (int)ctx.skyline.snapWaste.size();
     b.wasteCount      = (int)ctx.skyline.wasteRects.size();
@@ -71,8 +79,8 @@ static void EmitBoundary(Packer::PackContext& ctx, int /*gridW*/, int /*placeX*/
     ctx.skyline.snapBoundaries.push_back(b);
 }
 
-void Packer::CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>& /*items*/, int curExactId, int start,
-                                 int step, int count, int* adjPids, int& numAdj, int maxAdj)
+void CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>& /*items*/, int curExactId, int start,
+                         int step, int count, int* adjPids, int& numAdj, int maxAdj)
 {
     // -1 means "no tier"; such items don't peer with each other (matches
     // ComputeGroupingBonus's exA >= 0 test).
@@ -92,6 +100,8 @@ void Packer::CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>
     }
 }
 
+} // namespace
+
 // Faster than MAXRECTS for the LAHC inner loop: O(n) state, O(n) per
 // placement. Quality within ~2-5% per Jylänki.
 // reserveW > 0: single-pass hard constraint (items can't overlap reserved rect).
@@ -99,8 +109,8 @@ void Packer::CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>
 // Candidate walk computes maxY + areaUnder in one segment sweep with an
 // early abort on maxY > maxAllowedY; waste is maxY * iw - areaUnder.
 
-void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vector<Item>& items, int target,
-                         const volatile long* abortFlag, int reserveX, int reserveW, int startIdx)
+void SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vector<Item>& items, int target,
+                 const volatile long* abortFlag, int reserveX, int reserveW, int startIdx)
 {
     int reserveY   = gridH - target;
     int totalCells = gridW * gridH;
@@ -377,7 +387,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
 
                     int contact = 0;
                     for (int k = 0; k < numAdj; ++k)
-                        contact += SharedBorder(cand, ctx.placements[adjPids[k]]);
+                        contact += Geometry::SharedBorder(cand, ctx.placements[adjPids[k]]);
 
                     long long combined = (long long)waste * ctx.skylineWasteCoef - contact;
 
@@ -563,3 +573,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
     ctx.skyline.snapN     = (int)items.size();
     ctx.skyline.snapValid = true;
 }
+
+} // namespace Heuristics
+
+} // namespace Packer

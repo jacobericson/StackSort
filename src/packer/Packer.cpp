@@ -3,7 +3,13 @@
 #include <algorithm>
 #include <cstring>
 
-static unsigned long long splitmix64_next(unsigned long long* state)
+namespace Packer
+{
+
+namespace
+{
+
+unsigned long long splitmix64_next(unsigned long long* state)
 {
     unsigned long long z = (*state += 0x9E3779B97F4A7C15ULL);
     z                    = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
@@ -12,10 +18,9 @@ static unsigned long long splitmix64_next(unsigned long long* state)
 }
 
 // Named functor for VS2010 (no lambdas).
-
 struct ItemSortCompare
 {
-    bool operator()(const Packer::Item& a, const Packer::Item& b) const
+    bool operator()(const Item& a, const Item& b) const
     {
         int maxA = (a.w > a.h) ? a.w : a.h;
         int maxB = (b.w > b.h) ? b.w : b.h;
@@ -29,12 +34,51 @@ struct ItemSortCompare
     }
 };
 
-void Packer::SortItems(std::vector<Item>& items)
+} // namespace
+
+namespace Geometry
+{
+
+int CountRotated(const std::vector<Placement>& placements)
+{
+    int count = 0;
+    for (size_t i = 0; i < placements.size(); ++i)
+    {
+        if (placements[i].rotated) ++count;
+    }
+    return count;
+}
+
+} // namespace Geometry
+
+namespace Grid
+{
+
+void BuildOccupancyGrid(PackContext& ctx, int gridW, int gridH)
+{
+    int totalCells = gridW * gridH;
+    ctx.grid.resize(totalCells);
+    memset(&ctx.grid[0], 0, totalCells);
+
+    for (size_t i = 0; i < ctx.placements.size(); ++i)
+    {
+        const Placement& p = ctx.placements[i];
+        for (int dy = 0; dy < p.h; ++dy)
+            memset(&ctx.grid[(p.y + dy) * gridW + p.x], 1, p.w);
+    }
+}
+
+} // namespace Grid
+
+namespace Search
+{
+
+void SortItems(std::vector<Item>& items)
 {
     std::stable_sort(items.begin(), items.end(), ItemSortCompare());
 }
 
-void Packer::InitPackContext(PackContext& ctx, int gridW, int gridH, int numItems)
+void InitPackContext(PackContext& ctx, int gridW, int gridH, int numItems)
 {
     int totalCells = gridW * gridH;
     ctx.maxRects.freeRects.reserve((size_t)numItems * 4u);
@@ -112,32 +156,8 @@ void Packer::InitPackContext(PackContext& ctx, int gridW, int gridH, int numItem
 #endif
 }
 
-void Packer::BuildOccupancyGrid(PackContext& ctx, int gridW, int gridH)
-{
-    int totalCells = gridW * gridH;
-    ctx.grid.resize(totalCells);
-    memset(&ctx.grid[0], 0, totalCells);
-
-    for (size_t i = 0; i < ctx.placements.size(); ++i)
-    {
-        const Placement& p = ctx.placements[i];
-        for (int dy = 0; dy < p.h; ++dy)
-            memset(&ctx.grid[(p.y + dy) * gridW + p.x], 1, p.w);
-    }
-}
-
-int Packer::CountRotated(const std::vector<Placement>& placements)
-{
-    int count = 0;
-    for (size_t i = 0; i < placements.size(); ++i)
-    {
-        if (placements[i].rotated) ++count;
-    }
-    return count;
-}
-
-Packer::Result Packer::Pack(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim, int target,
-                            const volatile long* abortFlag, PackContext* reuseCtx)
+Result Pack(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim, int target,
+            const volatile long* abortFlag, PackContext* reuseCtx)
 {
     if (dim == TARGET_H) return PackH(gridW, gridH, items, target, abortFlag, reuseCtx);
 
@@ -160,8 +180,8 @@ Packer::Result Packer::Pack(int gridW, int gridH, const std::vector<Item>& items
     return r;
 }
 
-Packer::Result Packer::PackH(int gridW, int gridH, const std::vector<Item>& items, int target,
-                             const volatile long* abortFlag, PackContext* reuseCtx)
+Result PackH(int gridW, int gridH, const std::vector<Item>& items, int target, const volatile long* abortFlag,
+             PackContext* reuseCtx)
 {
     Result result;
     result.lerArea       = 0;
@@ -182,11 +202,11 @@ Packer::Result Packer::PackH(int gridW, int gridH, const std::vector<Item>& item
     PackContext& ctx = reuseCtx ? *reuseCtx : localCtx;
     InitPackContext(ctx, gridW, gridH, (int)items.size());
 
-    MaxRectsPack(ctx, gridW, gridH, sorted, target, abortFlag, 0, 0, 0);
+    Heuristics::MaxRectsPack(ctx, gridW, gridH, sorted, target, abortFlag, 0, 0, 0);
     if (abortFlag && *abortFlag != 0) return result;
     std::vector<Placement> bssfPl = ctx.placements;
 
-    MaxRectsPack(ctx, gridW, gridH, sorted, target, abortFlag, 0, 0, 1);
+    Heuristics::MaxRectsPack(ctx, gridW, gridH, sorted, target, abortFlag, 0, 0, 1);
     if (abortFlag && *abortFlag != 0)
     {
         result.placements = bssfPl;
@@ -198,19 +218,23 @@ Packer::Result Packer::PackH(int gridW, int gridH, const std::vector<Item>& item
 
     result.allPlaced = (result.placements.size() == items.size());
 
-    BuildOccupancyGrid(ctx, gridW, gridH);
-    ComputeLERCtx(ctx, &ctx.grid[0], gridW, gridH, result.lerArea, result.lerWidth, result.lerHeight, result.lerX,
-                  result.lerY);
-    result.concentration = ComputeConcentrationAndStrandedCtx(ctx, gridW, gridH, result.lerX, result.lerY,
-                                                              result.lerWidth, result.lerHeight, result.strandedCells);
+    Grid::BuildOccupancyGrid(ctx, gridW, gridH);
+    Ler::ComputeLERCtx(ctx, &ctx.grid[0], gridW, gridH, result.lerArea, result.lerWidth, result.lerHeight, result.lerX,
+                       result.lerY);
+    result.concentration = Ler::ComputeConcentrationAndStrandedCtx(
+        ctx, gridW, gridH, result.lerX, result.lerY, result.lerWidth, result.lerHeight, result.strandedCells);
 
     // Score — PackH has no SearchParams plumbing, so use compile-time defaults.
-    int numRot           = CountRotated(result.placements);
-    long long grouping   = ComputeGroupingBonus(result.placements, items, ctx, Packer::DEFAULT_GROUPING_POWER_QUARTERS);
+    int numRot         = Geometry::CountRotated(result.placements);
+    long long grouping = Scoring::ComputeGroupingBonus(result.placements, items, ctx, DEFAULT_GROUPING_POWER_QUARTERS);
     result.groupingBonus = grouping;
     result.score =
-        ComputeScore(result.placements.size(), result.lerArea, result.lerHeight, result.concentration, target, numRot,
-                     grouping, result.strandedCells, Packer::DEFAULT_GROUPING_WEIGHT, Packer::DEFAULT_FRAG_WEIGHT);
+        Scoring::ComputeScore(result.placements.size(), result.lerArea, result.lerHeight, result.concentration, target,
+                              numRot, grouping, result.strandedCells, DEFAULT_GROUPING_WEIGHT, DEFAULT_FRAG_WEIGHT);
 
     return result;
 }
+
+} // namespace Search
+
+} // namespace Packer

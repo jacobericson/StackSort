@@ -4,6 +4,12 @@
 #include <algorithm>
 #include <cstring>
 
+namespace Packer
+{
+
+namespace PostPack
+{
+
 // Permute items within contiguous strips. A vertical strip is a set of
 // placements sharing (x, w) with heights stacked contiguously along y; a
 // horizontal strip is the transposed version. Cell occupancy is preserved
@@ -11,8 +17,8 @@
 // occupies which slice shifts. Adjacency is re-scored via the full
 // ComputeGroupingBonusAdj path so exactId/soft-tier weights apply.
 
-void Packer::StripShift(std::vector<Placement>& placements, const std::vector<Item>& items, PackContext& ctx, int gridW,
-                        int gridH, int groupingPowerQuarters, int* outStripsFound, int* outStripsImproved)
+void StripShift(std::vector<Placement>& placements, const std::vector<Item>& items, PackContext& ctx, int gridW,
+                int gridH, int groupingPowerQuarters, int* outStripsFound, int* outStripsImproved)
 {
     (void)gridH;
 
@@ -156,8 +162,8 @@ void Packer::StripShift(std::vector<Placement>& placements, const std::vector<It
             }
 
             // Score identity first so we compare apples to apples.
-            BuildAdjGraph(g, placements);
-            long long bestScore = ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
+            Scoring::BuildAdjGraph(g, placements);
+            long long bestScore = Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
             long long baseScore = bestScore;
 
             // Enumerate remaining permutations. next_permutation starts from
@@ -173,8 +179,8 @@ void Packer::StripShift(std::vector<Placement>& placements, const std::vector<It
                     cy += origH[perm[i]];
                 }
 
-                BuildAdjGraph(g, placements);
-                long long score = ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
+                Scoring::BuildAdjGraph(g, placements);
+                long long score = Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
                 if (score > bestScore)
                 {
                     bestScore = score;
@@ -215,3 +221,7 @@ void Packer::StripShift(std::vector<Placement>& placements, const std::vector<It
     if (outStripsFound) *outStripsFound = stripsFound;
     if (outStripsImproved) *outStripsImproved = stripsImproved;
 }
+
+} // namespace PostPack
+
+} // namespace Packer

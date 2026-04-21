@@ -5,6 +5,12 @@
 #include <algorithm>
 #include <vector>
 
+namespace Packer
+{
+
+namespace Search
+{
+
 // Move-type dispatch thresholds on a 0..99 roll. Cascading: the first
 // MOVE_*_MAX that roll < passes selects the move. Repair has no MAX
 // constant because it's the residual bucket (roll >= MOVE_ROTATE_MAX).
@@ -71,10 +77,10 @@ struct Move
     MoveType type;
     int a;
     int b;
-    Packer::Item savedItem; // snapshot for rotate-flip undo
+    Item savedItem; // snapshot for rotate-flip undo
 };
 
-static inline void UndoMove(std::vector<Packer::Item>& order, const Move& m)
+static inline void UndoMove(std::vector<Item>& order, const Move& m)
 {
     switch (m.type)
     {
@@ -86,7 +92,7 @@ static inline void UndoMove(std::vector<Packer::Item>& order, const Move& m)
     {
         // a = original position, b = position after insert. Reverse via
         // remove-from-b + reinsert-at-a.
-        Packer::Item tmp = order[m.b];
+        Item tmp = order[m.b];
         order.erase(order.begin() + m.b);
         order.insert(order.begin() + m.a, tmp);
         break;
@@ -99,7 +105,7 @@ static inline void UndoMove(std::vector<Packer::Item>& order, const Move& m)
 
 // Fisher-Yates shuffle of same-type item groups as units.
 // Items must already be sorted so same-type items are consecutive.
-static inline void ShuffleGroups(std::vector<Packer::Item>& items, LCG& rng)
+static inline void ShuffleGroups(std::vector<Item>& items, LCG& rng)
 {
     if (items.size() <= 1) return;
 
@@ -134,7 +140,7 @@ static inline void ShuffleGroups(std::vector<Packer::Item>& items, LCG& rng)
     }
 
     // Rebuild items in new group order
-    std::vector<Packer::Item> reordered;
+    std::vector<Item> reordered;
     reordered.reserve(items.size());
     for (size_t g = 0; g < groups.size(); ++g)
     {
@@ -146,9 +152,9 @@ static inline void ShuffleGroups(std::vector<Packer::Item>& items, LCG& rng)
 
 // Empty sentinel for placementIdGrid is -1 (not 0) — writing 0 would alias
 // pidx=0 and corrupt CollectAdjacentPids.
-static inline void RestoreSkylineState(Packer::PackContext& ctx, int gridW, int /*gridH*/, int keptPrefix)
+static inline void RestoreSkylineState(PackContext& ctx, int gridW, int /*gridH*/, int keptPrefix)
 {
-    const Packer::SkylineBoundary& b = ctx.skyline.snapBoundaries[(size_t)keptPrefix];
+    const SkylineBoundary& b = ctx.skyline.snapBoundaries[(size_t)keptPrefix];
 
     // Roll back ctx.grid + placementIdGrid for every placement being
     // discarded. Walking placements directly is equivalent to the old
@@ -156,7 +162,7 @@ static inline void RestoreSkylineState(Packer::PackContext& ctx, int gridW, int 
     // EmitBoundary's hot path.
     for (size_t i = (size_t)b.placementsCount; i < ctx.placements.size(); ++i)
     {
-        const Packer::Placement& p = ctx.placements[i];
+        const Placement& p = ctx.placements[i];
         for (int dy = 0; dy < p.h; ++dy)
             for (int dx = 0; dx < p.w; ++dx)
             {
@@ -202,12 +208,11 @@ static inline void RestoreSkylineState(Packer::PackContext& ctx, int gridW, int 
 // bestStranded / repairGridDirty / *outBestOrder in lockstep. Call-site-
 // specific counters (itersSinceImproved, bestIterInRestart0, diagBestFound*)
 // stay inline at the LAHC sites.
-static inline void UpdateBestFromCurrent(Packer::PackContext& ctx, long long& bestScore, long long newScore,
-                                         int& bestLerA, int newLerA, int& bestLerW, int newLerW, int& bestLerH,
-                                         int newLerH, int& bestLerX, int newLerX, int& bestLerY, int newLerY,
-                                         double& bestConc, double newConc, int& bestStranded, int newStranded,
-                                         bool& repairGridDirty, std::vector<Packer::Item>* outBestOrder,
-                                         const std::vector<Packer::Item>& curOrder)
+static inline void UpdateBestFromCurrent(PackContext& ctx, long long& bestScore, long long newScore, int& bestLerA,
+                                         int newLerA, int& bestLerW, int newLerW, int& bestLerH, int newLerH,
+                                         int& bestLerX, int newLerX, int& bestLerY, int newLerY, double& bestConc,
+                                         double newConc, int& bestStranded, int newStranded, bool& repairGridDirty,
+                                         std::vector<Item>* outBestOrder, const std::vector<Item>& curOrder)
 {
     bestScore       = newScore;
     ctx.bestPl      = ctx.placements;
@@ -226,9 +231,8 @@ static inline void UpdateBestFromCurrent(Packer::PackContext& ctx, long long& be
 // from originalItems to neutralize MOVE_ROTATE pollution) then admits via
 // diversity-filter + weakest-replacement pool policy. Called from
 // PackAnnealedH at every global-best improvement and at each restart's end.
-void CapturePathRelinkElite(Packer::PackContext& ctx, const std::vector<Packer::Item>& curOrder,
-                            const std::vector<Packer::Item>& originalItems, long long score, int eliteCap,
-                            int diversityThreshold);
+void CapturePathRelinkElite(PackContext& ctx, const std::vector<Item>& curOrder, const std::vector<Item>& originalItems,
+                            long long score, int eliteCap, int diversityThreshold);
 
 // Repair-move body. Extracted to PackerRepairMove.cpp. Called when the LAHC
 // move-roll lands in the repair bucket: finds a stranded cell in the current
@@ -239,8 +243,12 @@ void CapturePathRelinkElite(Packer::PackContext& ctx, const std::vector<Packer::
 // LAHC-local scratch cache for bestPl occupancy + LER-reachability +
 // stranded-cell list, keyed on repairGridDirty so cache rebuilds happen only
 // when ctx.bestPl has changed.
-void TryRepairMove(Packer::PackContext& ctx, int gridW, int gridH, std::vector<Packer::Item>& curOrder, int n,
-                   Move& move, LCG& rng, int bestLerX, int bestLerY, int bestLerW, int bestLerH, int bestStranded,
+void TryRepairMove(PackContext& ctx, int gridW, int gridH, std::vector<Item>& curOrder, int n, Move& move, LCG& rng,
+                   int bestLerX, int bestLerY, int bestLerW, int bestLerH, int bestStranded,
                    std::vector<unsigned char>& repairGrid, std::vector<unsigned char>& repairReachable,
                    std::vector<int>& repairStrandedList, bool& repairGridDirty, int totalCellsRepair,
                    int effLateBiasAlphaQ, int effLateBiasUniformPct, int& diagRepairMoveScans, int& diagRepairMoveHits);
+
+} // namespace Search
+
+} // namespace Packer

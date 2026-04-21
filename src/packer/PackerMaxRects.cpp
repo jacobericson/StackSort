@@ -2,18 +2,27 @@
 
 #include <climits>
 
-bool Packer::Overlaps(const Rect& a, const Rect& b)
+namespace Packer
+{
+
+namespace Heuristics
+{
+
+namespace
+{
+
+bool Overlaps(const Rect& a, const Rect& b)
 {
     return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
-bool Packer::Contains(const Rect& outer, const Rect& inner)
+bool Contains(const Rect& outer, const Rect& inner)
 {
     return inner.x >= outer.x && inner.y >= outer.y && inner.x + inner.w <= outer.x + outer.w &&
            inner.y + inner.h <= outer.y + outer.h;
 }
 
-void Packer::SplitFreeRects(PackContext& ctx, const Rect& placed)
+void SplitFreeRects(PackContext& ctx, const Rect& placed)
 {
     ctx.maxRects.newRects.clear();
 
@@ -75,7 +84,7 @@ void Packer::SplitFreeRects(PackContext& ctx, const Rect& placed)
     ctx.maxRects.freeRects.swap(ctx.maxRects.newRects);
 }
 
-void Packer::PruneFreeRects(PackContext& ctx)
+void PruneFreeRects(PackContext& ctx)
 {
     size_t n = ctx.maxRects.freeRects.size();
     ctx.maxRects.dead.assign(n, false);
@@ -109,9 +118,8 @@ void Packer::PruneFreeRects(PackContext& ctx)
 // aboveReserveY >= 0: only rects where item fits above that Y. < 0: all rects.
 
 // BSSF: minimize min(rw, rh), then max(rw, rh), then combing.
-void Packer::FindBestBSSF(const std::vector<Rect>& freeRects, const Item& item, int numOri, int aboveReserveY,
-                          int& bestShortSide, int& bestLongSide, int& bestIndex, int& bestW, int& bestH,
-                          bool& bestRotated)
+void FindBestBSSF(const std::vector<Rect>& freeRects, const Item& item, int numOri, int aboveReserveY,
+                  int& bestShortSide, int& bestLongSide, int& bestIndex, int& bestW, int& bestH, bool& bestRotated)
 {
     for (size_t fi = 0; fi < freeRects.size(); ++fi)
     {
@@ -148,9 +156,8 @@ void Packer::FindBestBSSF(const std::vector<Rect>& freeRects, const Item& item, 
 }
 
 // BAF: minimize leftover area (rw * rh), then short side, then combing.
-void Packer::FindBestBAF(const std::vector<Rect>& freeRects, const Item& item, int numOri, int aboveReserveY,
-                         long long& bestArea, int& bestShortSide, int& bestIndex, int& bestW, int& bestH,
-                         bool& bestRotated)
+void FindBestBAF(const std::vector<Rect>& freeRects, const Item& item, int numOri, int aboveReserveY,
+                 long long& bestArea, int& bestShortSide, int& bestIndex, int& bestW, int& bestH, bool& bestRotated)
 {
     for (size_t fi = 0; fi < freeRects.size(); ++fi)
     {
@@ -185,8 +192,10 @@ void Packer::FindBestBAF(const std::vector<Rect>& freeRects, const Item& item, i
     }
 }
 
-void Packer::MaxRectsPack(PackContext& ctx, int gridW, int gridH, const std::vector<Item>& items, int target,
-                          const volatile long* abortFlag, int reserveX, int reserveW, int heuristic)
+} // namespace
+
+void MaxRectsPack(PackContext& ctx, int gridW, int gridH, const std::vector<Item>& items, int target,
+                  const volatile long* abortFlag, int reserveX, int reserveW, int heuristic)
 {
     ctx.placements.clear();
     ctx.maxRects.freeRects.clear();
@@ -291,3 +300,7 @@ void Packer::MaxRectsPack(PackContext& ctx, int gridW, int gridH, const std::vec
         PruneFreeRects(ctx);
     }
 }
+
+} // namespace Heuristics
+
+} // namespace Packer

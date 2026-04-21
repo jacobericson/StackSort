@@ -9,8 +9,15 @@
 // tiler over the destination rectangle; at k ≤ 10 pieces this outperforms DLX
 // (no sparse-matrix setup). Cell occupancy preserved by construction.
 
+namespace Packer
+{
+
+namespace PostPack
+{
+
 namespace
 {
+
 struct TileItem
 {
     int placementIdx; // index into outer placements[] (group member)
@@ -115,10 +122,11 @@ bool TileBacktrack(TileCtx& tc)
     }
     return false;
 }
+
 } // namespace
 
-void Packer::TileSwap(std::vector<Placement>& placements, const std::vector<Item>& items, PackContext& ctx, int gridW,
-                      int gridH, int groupingPowerQuarters, int* outCandidatesFound, int* outCandidatesCommitted)
+void TileSwap(std::vector<Placement>& placements, const std::vector<Item>& items, PackContext& ctx, int gridW,
+              int gridH, int groupingPowerQuarters, int* outCandidatesFound, int* outCandidatesCommitted)
 {
     int n = (int)placements.size();
     if (n <= 1 || n > 256) return;
@@ -128,8 +136,8 @@ void Packer::TileSwap(std::vector<Placement>& placements, const std::vector<Item
     int candCommitted = 0;
 
     AdjGraph g;
-    BuildAdjGraph(g, placements);
-    long long curScore = ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
+    Scoring::BuildAdjGraph(g, placements);
+    long long curScore = Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
 
     // For each placement X, try to find a rectangular region R elsewhere on
     // the grid with X's footprint (or rotated) such that R is covered
@@ -283,8 +291,9 @@ void Packer::TileSwap(std::vector<Placement>& placements, const std::vector<Item
                         mp.rotated    = (pieces[k].rotw != items[mp.id].w);
                     }
 
-                    BuildAdjGraph(g, placements);
-                    long long newScore = ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
+                    Scoring::BuildAdjGraph(g, placements);
+                    long long newScore =
+                        Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
 
                     if (newScore > curScore)
                     {
@@ -319,3 +328,7 @@ void Packer::TileSwap(std::vector<Placement>& placements, const std::vector<Item
     if (outCandidatesFound) *outCandidatesFound = candFound;
     if (outCandidatesCommitted) *outCandidatesCommitted = candCommitted;
 }
+
+} // namespace PostPack
+
+} // namespace Packer

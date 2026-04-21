@@ -4,8 +4,14 @@
 #include <algorithm>
 #include <cstring>
 
-void Packer::ComputeLERCtx(PackContext& ctx, const unsigned char* grid, int gridW, int gridH, int& outArea,
-                           int& outWidth, int& outHeight, int& outX, int& outY)
+namespace Packer
+{
+
+namespace Ler
+{
+
+void ComputeLERCtx(PackContext& ctx, const unsigned char* grid, int gridW, int gridH, int& outArea, int& outWidth,
+                   int& outHeight, int& outX, int& outY)
 {
     outArea   = 0;
     outWidth  = 0;
@@ -82,8 +88,8 @@ void Packer::ComputeLERCtx(PackContext& ctx, const unsigned char* grid, int grid
 // When lerW==0 or lerH==0 (no LER found), no region is LER-connected and
 // ALL interior empty cells count as stranded — matches legacy semantics.
 
-double Packer::ComputeConcentrationAndStrandedCtx(PackContext& ctx, int gridW, int gridH, int lerX, int lerY, int lerW,
-                                                  int lerH, int& outStrandedCells)
+double ComputeConcentrationAndStrandedCtx(PackContext& ctx, int gridW, int gridH, int lerX, int lerY, int lerW,
+                                          int lerH, int& outStrandedCells)
 {
     outStrandedCells = 0;
 
@@ -187,13 +193,27 @@ double Packer::ComputeConcentrationAndStrandedCtx(PackContext& ctx, int gridW, i
     return hhi;
 }
 
+void ComputeLER(const std::vector<unsigned char>& grid, int gridW, int gridH, int& outArea, int& outWidth,
+                int& outHeight, int& outX, int& outY)
+{
+    PackContext ctx;
+    ctx.ler.heights.resize(gridW);
+    ctx.ler.lerStack.resize(gridW + 1);
+    ComputeLERCtx(ctx, &grid[0], gridW, gridH, outArea, outWidth, outHeight, outX, outY);
+}
+
+} // namespace Ler
+
+namespace Grid
+{
+
 // Shared helper used by the repair_move branch in PackAnnealedH. Assumes
 // ctx.grid is already populated. Resets ctx.visited and flood-fills
 // 4-connected empty cells starting from all empty cells inside the LER
 // rectangle. On return, ctx.visited[i] == 1 iff cell i is empty AND
 // reachable from the LER through empty cells.
-void Packer::FloodFillFromLer(PackContext& ctx, int gridW, int gridH, int lerX, int lerY, int lerW, int lerH,
-                              const unsigned char* extGrid)
+void FloodFillFromLer(PackContext& ctx, int gridW, int gridH, int lerX, int lerY, int lerW, int lerH,
+                      const unsigned char* extGrid)
 {
     int totalCells = gridW * gridH;
     if (totalCells == 0) return;
@@ -249,11 +269,6 @@ void Packer::FloodFillFromLer(PackContext& ctx, int gridW, int gridH, int lerX, 
     }
 }
 
-void Packer::ComputeLER(const std::vector<unsigned char>& grid, int gridW, int gridH, int& outArea, int& outWidth,
-                        int& outHeight, int& outX, int& outY)
-{
-    PackContext ctx;
-    ctx.ler.heights.resize(gridW);
-    ctx.ler.lerStack.resize(gridW + 1);
-    ComputeLERCtx(ctx, &grid[0], gridW, gridH, outArea, outWidth, outHeight, outX, outY);
-}
+} // namespace Grid
+
+} // namespace Packer

@@ -4,8 +4,14 @@
 #include <algorithm>
 #include <cstring>
 
-void TryRepairMove(Packer::PackContext& ctx, int gridW, int gridH, std::vector<Packer::Item>& curOrder, int n,
-                   Move& move, LCG& rng, int bestLerX, int bestLerY, int bestLerW, int bestLerH, int bestStranded,
+namespace Packer
+{
+
+namespace Search
+{
+
+void TryRepairMove(PackContext& ctx, int gridW, int gridH, std::vector<Item>& curOrder, int n, Move& move, LCG& rng,
+                   int bestLerX, int bestLerY, int bestLerW, int bestLerH, int bestStranded,
                    std::vector<unsigned char>& repairGrid, std::vector<unsigned char>& repairReachable,
                    std::vector<int>& repairStrandedList, bool& repairGridDirty, int totalCellsRepair,
                    int effLateBiasAlphaQ, int effLateBiasUniformPct, int& diagRepairMoveScans, int& diagRepairMoveHits)
@@ -30,11 +36,11 @@ void TryRepairMove(Packer::PackContext& ctx, int gridW, int gridH, std::vector<P
             memset(&repairGrid[0], 0, totalCellsRepair);
             for (size_t pi = 0; pi < ctx.bestPl.size(); ++pi)
             {
-                const Packer::Placement& bp = ctx.bestPl[pi];
+                const Placement& bp = ctx.bestPl[pi];
                 for (int dy = 0; dy < bp.h; ++dy)
                     memset(&repairGrid[(bp.y + dy) * gridW + bp.x], 1, bp.w);
             }
-            Packer::FloodFillFromLer(ctx, gridW, gridH, bestLerX, bestLerY, bestLerW, bestLerH, &repairGrid[0]);
+            Grid::FloodFillFromLer(ctx, gridW, gridH, bestLerX, bestLerY, bestLerW, bestLerH, &repairGrid[0]);
             memcpy(&repairReachable[0], &ctx.visited[0], totalCellsRepair);
             // Build stranded-cell list in the same scan order the
             // reservoir loop used to walk, so the RNG stream below
@@ -145,9 +151,9 @@ void TryRepairMove(Packer::PackContext& ctx, int gridW, int gridH, std::vector<P
                 if (fitsNormal || fitsRotated)
                 {
                     // Targeted insert: move this item to position 0
-                    move.a           = ki;
-                    move.b           = 0;
-                    Packer::Item tmp = curOrder[move.a];
+                    move.a   = ki;
+                    move.b   = 0;
+                    Item tmp = curOrder[move.a];
                     curOrder.erase(curOrder.begin() + move.a);
                     curOrder.insert(curOrder.begin() + move.b, tmp);
                     repairFound = true;
@@ -168,3 +174,7 @@ void TryRepairMove(Packer::PackContext& ctx, int gridW, int gridH, std::vector<P
         std::swap(curOrder[move.a], curOrder[move.b]);
     }
 }
+
+} // namespace Search
+
+} // namespace Packer

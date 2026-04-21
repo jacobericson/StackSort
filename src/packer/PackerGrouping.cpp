@@ -5,7 +5,13 @@
 #include <cstring>
 #include <vector>
 
-void Packer::BuildPairWeightMatrix(PackContext& ctx, const std::vector<Item>& items)
+namespace Packer
+{
+
+namespace Scoring
+{
+
+void BuildPairWeightMatrix(PackContext& ctx, const std::vector<Item>& items)
 {
     int n = (int)items.size();
     // assign() overwrites in place when capacity >= n*n; InitPackContext
@@ -23,7 +29,7 @@ void Packer::BuildPairWeightMatrix(PackContext& ctx, const std::vector<Item>& it
     }
 }
 
-void Packer::BuildAdjGraph(AdjGraph& g, const std::vector<Placement>& placements)
+void BuildAdjGraph(AdjGraph& g, const std::vector<Placement>& placements)
 {
     int n = (int)placements.size();
     if (n > 256) return;
@@ -33,7 +39,7 @@ void Packer::BuildAdjGraph(AdjGraph& g, const std::vector<Placement>& placements
     {
         for (int j = i + 1; j < n; ++j)
         {
-            int b = SharedBorder(placements[i], placements[j]);
+            int b = Geometry::SharedBorder(placements[i], placements[j]);
             if (b > 0)
             {
                 // Drop symmetrically if either side is full --
@@ -53,6 +59,9 @@ void Packer::BuildAdjGraph(AdjGraph& g, const std::vector<Placement>& placements
     }
 }
 
+namespace
+{
+
 // Shared accumulator for the three grouping scorers. Fills caller-owned
 // union-find arrays with per-component border totals. Three enumeration
 // strategies dispatched on (g, softActive):
@@ -64,9 +73,9 @@ void Packer::BuildAdjGraph(AdjGraph& g, const std::vector<Placement>& placements
 // Always runs the union-find fixup pass so callers can index compBorders[]
 // by root index.
 
-void Packer::AccumulateGroupingComponents(const std::vector<Placement>& placements, const std::vector<Item>& items,
-                                          const PackContext& ctx, int n, const AdjGraph* g, int parent[],
-                                          int compBorders[], int softParent[], int softCompBorders[])
+void AccumulateGroupingComponents(const std::vector<Placement>& placements, const std::vector<Item>& items,
+                                  const PackContext& ctx, int n, const AdjGraph* g, int parent[], int compBorders[],
+                                  int softParent[], int softCompBorders[])
 {
     for (int i = 0; i < n; ++i)
     {
@@ -151,7 +160,7 @@ void Packer::AccumulateGroupingComponents(const std::vector<Placement>& placemen
                 for (int pj = pi + 1; pj < runEnd; ++pj)
                 {
                     int j      = ixBuf[pj];
-                    int shared = Packer::SharedBorder(placements[i], placements[j]);
+                    int shared = Geometry::SharedBorder(placements[i], placements[j]);
                     if (shared <= 0) continue;
                     uf_unite(parent, i, j);
                     compBorders[uf_find(parent, i)] += shared;
@@ -168,7 +177,7 @@ void Packer::AccumulateGroupingComponents(const std::vector<Placement>& placemen
             int exA = items[idA].exactId;
             for (int j = i + 1; j < n; ++j)
             {
-                int shared = Packer::SharedBorder(placements[i], placements[j]);
+                int shared = Geometry::SharedBorder(placements[i], placements[j]);
                 if (shared <= 0) continue;
                 int idB = placements[j].id;
                 if (exA >= 0 && items[idB].exactId == exA)
@@ -218,9 +227,9 @@ void Packer::AccumulateGroupingComponents(const std::vector<Placement>& placemen
 // linear pass-through used by BordersRaw). outExactOnly receives the
 // exact-track contribution pre-soft — NULL when the caller doesn't need it.
 
-static long long FinalizeGroupingBonus(int n, int parent[], const int compBorders[], int softParent[],
-                                       const int softCompBorders[], int exactQuarters, int softQuarters, int softPct,
-                                       long long* outExactOnly)
+long long FinalizeGroupingBonus(int n, int parent[], const int compBorders[], int softParent[],
+                                const int softCompBorders[], int exactQuarters, int softQuarters, int softPct,
+                                long long* outExactOnly)
 {
     long long exactBonus = 0;
     for (int i = 0; i < n; ++i)
@@ -241,10 +250,12 @@ static long long FinalizeGroupingBonus(int n, int parent[], const int compBorder
     return exactBonus + softBonus * softPct / 100;
 }
 
+} // namespace
+
 // O(E) scorer over a prebuilt AdjGraph. Used by OptimizeGrouping / StripShift
 // / TileSwap where the same graph is re-scored many times per pack.
-long long Packer::ComputeGroupingBonusAdj(const std::vector<Placement>& placements, const std::vector<Item>& items,
-                                          const AdjGraph& g, int n, const PackContext& ctx, int groupingPowerQuarters)
+long long ComputeGroupingBonusAdj(const std::vector<Placement>& placements, const std::vector<Item>& items,
+                                  const AdjGraph& g, int n, const PackContext& ctx, int groupingPowerQuarters)
 {
     if (n <= 1 || n > 256) return 0;
     int parent[256], compBorders[256], softParent[256], softCompBorders[256];
@@ -255,8 +266,8 @@ long long Packer::ComputeGroupingBonusAdj(const std::vector<Placement>& placemen
 
 // O(n²) scorer without a prebuilt graph. Used by the LAHC inner loop where
 // a graph rebuild per iter would just duplicate the same SharedBorder scans.
-long long Packer::ComputeGroupingBonus(const std::vector<Placement>& placements, const std::vector<Item>& items,
-                                       const PackContext& ctx, int groupingPowerQuarters, long long* outExactOnly)
+long long ComputeGroupingBonus(const std::vector<Placement>& placements, const std::vector<Item>& items,
+                               const PackContext& ctx, int groupingPowerQuarters, long long* outExactOnly)
 {
     int n = (int)placements.size();
     if (n <= 1 || n > 256)
@@ -273,8 +284,8 @@ long long Packer::ComputeGroupingBonus(const std::vector<Placement>& placements,
 // Power-independent border total. Sums weighted Σ b per component with no
 // exponent applied (exactQuarters = softQuarters = 4 → applyGroupingPower
 // returns b as-is). Used once per final result for cross-power diagnostics.
-long long Packer::ComputeGroupingBordersRaw(const std::vector<Placement>& placements, const std::vector<Item>& items,
-                                            const PackContext& ctx)
+long long ComputeGroupingBordersRaw(const std::vector<Placement>& placements, const std::vector<Item>& items,
+                                    const PackContext& ctx)
 {
     int n = (int)placements.size();
     if (n <= 1 || n > 256) return 0;
@@ -284,18 +295,23 @@ long long Packer::ComputeGroupingBordersRaw(const std::vector<Placement>& placem
                                  ctx.grouping.softGroupingPct, NULL);
 }
 
+} // namespace Scoring
+
+namespace PostPack
+{
+
 // Swap same-footprint items to improve clustering.
 // Physical layout unchanged since occupied cells are identical.
 
-void Packer::OptimizeGrouping(std::vector<Placement>& placements, const std::vector<Item>& items,
-                              const PackContext& ctx, int groupingPowerQuarters)
+void OptimizeGrouping(std::vector<Placement>& placements, const std::vector<Item>& items, const PackContext& ctx,
+                      int groupingPowerQuarters)
 {
     int n = (int)placements.size();
     if (n <= 1 || n > 256) return;
 
     // Precompute adjacency graph (O(n²) once)
     AdjGraph g;
-    BuildAdjGraph(g, placements);
+    Scoring::BuildAdjGraph(g, placements);
 
     // Precompute candidate swap pairs by footprint.
     // Group placements by (w,h). Only cross-type pairs within the same
@@ -368,7 +384,7 @@ void Packer::OptimizeGrouping(std::vector<Placement>& placements, const std::vec
     while (improved)
     {
         improved              = false;
-        long long curGrouping = ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
+        long long curGrouping = Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
 
         for (int ci = 0; ci < numCandidates; ++ci)
         {
@@ -379,7 +395,8 @@ void Packer::OptimizeGrouping(std::vector<Placement>& placements, const std::vec
             if (items[placements[pi].id].exactId == items[placements[pj].id].exactId) continue;
 
             std::swap(placements[pi].id, placements[pj].id);
-            long long newGrouping = ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
+            long long newGrouping =
+                Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
 
             if (newGrouping > curGrouping)
             {
@@ -393,3 +410,7 @@ void Packer::OptimizeGrouping(std::vector<Placement>& placements, const std::vec
         }
     }
 }
+
+} // namespace PostPack
+
+} // namespace Packer

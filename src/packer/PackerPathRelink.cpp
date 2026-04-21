@@ -3,11 +3,20 @@
 
 #include <algorithm>
 
+namespace Packer
+{
+
+namespace Search
+{
+
+namespace
+{
+
 // Count positions where two orderings' exactIds disagree. Used as the
 // diversity metric for Path Relinking elite admission — raw id-Hamming
 // would false-reject pairs that differ only by swapping same-exactId
 // siblings, which are packing-equivalent.
-static int PathRelinkExactIdHamming(const std::vector<Packer::Item>& a, const std::vector<Packer::Item>& b)
+int PathRelinkExactIdHamming(const std::vector<Item>& a, const std::vector<Item>& b)
 {
     int d    = 0;
     size_t n = a.size();
@@ -17,6 +26,8 @@ static int PathRelinkExactIdHamming(const std::vector<Packer::Item>& a, const st
     return d;
 }
 
+} // namespace
+
 // Capture curOrder into the elite pool. Two safety nets:
 //   - Normalize w/h/canRotate from originalItems so MOVE_ROTATE's in-place
 //     mutation of curOrder entries doesn't produce elites whose geometry
@@ -24,11 +35,10 @@ static int PathRelinkExactIdHamming(const std::vector<Packer::Item>& a, const st
 //   - Reject near-duplicates via exactId-Hamming < diversityThreshold.
 // Pool policy: append until cap, then replace weakest-scoring entry (only
 // if the new score is strictly higher).
-void CapturePathRelinkElite(Packer::PackContext& ctx, const std::vector<Packer::Item>& curOrder,
-                            const std::vector<Packer::Item>& originalItems, long long score, int eliteCap,
-                            int diversityThreshold)
+void CapturePathRelinkElite(PackContext& ctx, const std::vector<Item>& curOrder, const std::vector<Item>& originalItems,
+                            long long score, int eliteCap, int diversityThreshold)
 {
-    std::vector<Packer::Item> normalized(curOrder);
+    std::vector<Item> normalized(curOrder);
     for (size_t i = 0; i < normalized.size(); ++i)
     {
         int id = normalized[i].id;
@@ -75,20 +85,19 @@ void CapturePathRelinkElite(Packer::PackContext& ctx, const std::vector<Packer::
 // transposition reuses keptPrefix = leftmost swap position. Snapshot gate
 // mirrors the LAHC loop's so PR degrades gracefully when the restore is
 // unsafe (full cold re-pack instead).
-bool Packer::PathRelinkWalk(PackContext& ctx, int gridW, int gridH, std::vector<Item>& s,
-                            const std::vector<Item>& goalOrder, const std::vector<Item>& originalItems, int target,
-                            const volatile long* abortFlag, int bestReserveX, int bestReserveW, int effGroupingWeight,
-                            int effFragWeight, int effGroupingPower, long long& bestScore, int& bestLerA, int& bestLerW,
-                            int& bestLerH, int& bestLerX, int& bestLerY, double& bestConc, int& bestStranded,
-                            bool& repairGridDirty, std::vector<Item>* outBestOrder, long long endpointScore,
-                            int maxPathLen, int& diagIntermediatesScored, int& diagBestUpdates, int& diagAbortedPaths,
-                            long long& diagGainMax, long long& diagAvgPathLenSum)
+bool PathRelinkWalk(PackContext& ctx, int gridW, int gridH, std::vector<Item>& s, const std::vector<Item>& goalOrder,
+                    const std::vector<Item>& originalItems, int target, const volatile long* abortFlag,
+                    int bestReserveX, int bestReserveW, int effGroupingWeight, int effFragWeight, int effGroupingPower,
+                    long long& bestScore, int& bestLerA, int& bestLerW, int& bestLerH, int& bestLerX, int& bestLerY,
+                    double& bestConc, int& bestStranded, bool& repairGridDirty, std::vector<Item>* outBestOrder,
+                    long long endpointScore, int maxPathLen, int& diagIntermediatesScored, int& diagBestUpdates,
+                    int& diagAbortedPaths, long long& diagGainMax, long long& diagAvgPathLenSum)
 {
     int n = (int)s.size();
     if (n != (int)goalOrder.size()) return false;
 
     ctx.skyline.snapValid = false;
-    SkylinePack(ctx, gridW, gridH, s, target, abortFlag, bestReserveX, bestReserveW);
+    Heuristics::SkylinePack(ctx, gridW, gridH, s, target, abortFlag, bestReserveX, bestReserveW);
     if (abortFlag && *abortFlag != 0) return false;
     if (!ctx.skyline.snapValid || ctx.skyline.snapN != n)
     {
@@ -131,16 +140,17 @@ bool Packer::PathRelinkWalk(PackContext& ctx, int gridW, int gridH, std::vector<
             ctx.skyline.snapValid && ctx.skyline.snapN == n && keptPrefix > 0 && keptPrefix < ctx.skyline.snapN;
         int startIdx = canRestore ? keptPrefix : 0;
         if (canRestore) RestoreSkylineState(ctx, gridW, gridH, keptPrefix);
-        SkylinePack(ctx, gridW, gridH, s, target, abortFlag, bestReserveX, bestReserveW, startIdx);
+        Heuristics::SkylinePack(ctx, gridW, gridH, s, target, abortFlag, bestReserveX, bestReserveW, startIdx);
         if (abortFlag && *abortFlag != 0) break;
         ++diagIntermediatesScored;
 
         int lerA, lerW, lerH, lerX, lerY, stranded = 0;
         double conc = 0.0;
-        GridCacheLookup(ctx, gridW, gridH, lerA, lerW, lerH, lerX, lerY, conc, stranded);
-        long long grp = ComputeGroupingBonus(ctx.placements, originalItems, ctx, effGroupingPower);
-        long long sc  = ComputeScore(ctx.placements.size(), lerA, lerH, conc, target, CountRotated(ctx.placements), grp,
-                                     stranded, effGroupingWeight, effFragWeight);
+        Cache::GridCacheLookup(ctx, gridW, gridH, lerA, lerW, lerH, lerX, lerY, conc, stranded);
+        long long grp = Scoring::ComputeGroupingBonus(ctx.placements, originalItems, ctx, effGroupingPower);
+        long long sc  = Scoring::ComputeScore(ctx.placements.size(), lerA, lerH, conc, target,
+                                              Geometry::CountRotated(ctx.placements), grp, stranded, effGroupingWeight,
+                                              effFragWeight);
 
         if (sc > bestScore)
         {
@@ -157,3 +167,7 @@ bool Packer::PathRelinkWalk(PackContext& ctx, int gridW, int gridH, std::vector<
     diagAvgPathLenSum += steps;
     return improved;
 }
+
+} // namespace Search
+
+} // namespace Packer

@@ -6,10 +6,16 @@
 #include <climits>
 #include <cstring>
 
-Packer::Result Packer::PackAnnealed(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim, int target,
-                                    const volatile long* abortFlag, const std::vector<Item>* seedOrder,
-                                    std::vector<Item>* outBestOrder, int skipLAHCIfAreaBelow,
-                                    const SearchParams* params, PackDiagnostics* outDiag, PackContext* reuseCtx)
+namespace Packer
+{
+
+namespace Search
+{
+
+Result PackAnnealed(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim, int target,
+                    const volatile long* abortFlag, const std::vector<Item>* seedOrder, std::vector<Item>* outBestOrder,
+                    int skipLAHCIfAreaBelow, const SearchParams* params, PackDiagnostics* outDiag,
+                    PackContext* reuseCtx)
 {
     if (dim == TARGET_H)
         return PackAnnealedH(gridW, gridH, items, target, abortFlag, seedOrder, outBestOrder, skipLAHCIfAreaBelow,
@@ -51,10 +57,9 @@ Packer::Result Packer::PackAnnealed(int gridW, int gridH, const std::vector<Item
     return r;
 }
 
-Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int target,
-                                     const volatile long* abortFlag, const std::vector<Item>* seedOrder,
-                                     std::vector<Item>* outBestOrder, int skipLAHCIfAreaBelow,
-                                     const SearchParams* params, PackDiagnostics* outDiag, PackContext* reuseCtx)
+Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int target, const volatile long* abortFlag,
+                     const std::vector<Item>* seedOrder, std::vector<Item>* outBestOrder, int skipLAHCIfAreaBelow,
+                     const SearchParams* params, PackDiagnostics* outDiag, PackContext* reuseCtx)
 {
     // Resolve effective LAHC parameters. Positive overrides win; <= 0 means
     // "use compiled default" (sentinel set by SearchParams default ctor).
@@ -82,15 +87,14 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
 
     // Scoring weights. -1 = compile-time default.
     int effGroupingWeight =
-        (params && params->scoringGroupingWeight > 0) ? params->scoringGroupingWeight : Packer::DEFAULT_GROUPING_WEIGHT;
-    int effFragWeight =
-        (params && params->scoringFragWeight > 0) ? params->scoringFragWeight : Packer::DEFAULT_FRAG_WEIGHT;
+        (params && params->scoringGroupingWeight > 0) ? params->scoringGroupingWeight : DEFAULT_GROUPING_WEIGHT;
+    int effFragWeight = (params && params->scoringFragWeight > 0) ? params->scoringFragWeight : DEFAULT_FRAG_WEIGHT;
 
     // Skyline tiebreaker waste coefficient. Sentinel <= 0 → default. Resolver
     // enforces >= 1: a coef of 0 makes the inner loop chase contact at the
     // expense of arbitrary waste, which breaks packing.
     int effSkylineWasteCoef =
-        (params && params->skylineWasteCoef >= 1) ? params->skylineWasteCoef : Packer::DEFAULT_SKYLINE_WASTE_COEF;
+        (params && params->skylineWasteCoef >= 1) ? params->skylineWasteCoef : DEFAULT_SKYLINE_WASTE_COEF;
 
     // Grouping power exponent in quarter-steps: b^(quarters/4). Sentinel
     // <= 0 → default 6 (b^1.5 = legacy). Clamp upper to 8 (= b^2) so the
@@ -98,21 +102,20 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     // long long range with headroom for any realistic component size.
     int effGroupingPower = (params && params->groupingPowerQuarters >= 1 && params->groupingPowerQuarters <= 8)
                                ? params->groupingPowerQuarters
-                               : Packer::DEFAULT_GROUPING_POWER_QUARTERS;
+                               : DEFAULT_GROUPING_POWER_QUARTERS;
 
     // Grouping tier weights. Sentinel -1 → compiled default; clamp upper to 100.
     // A weight of 0 disables that tier in PairWeight. Function-similarity
     // overrides fold into the function tier before the MAX-across-tiers step.
     int effTierWeightExact =
-        (params && params->tierWeightExact >= 0) ? params->tierWeightExact : Packer::DEFAULT_TIER_WEIGHT_EXACT;
+        (params && params->tierWeightExact >= 0) ? params->tierWeightExact : DEFAULT_TIER_WEIGHT_EXACT;
     int effTierWeightCustom =
-        (params && params->tierWeightCustom >= 0) ? params->tierWeightCustom : Packer::DEFAULT_TIER_WEIGHT_CUSTOM;
-    int effTierWeightType =
-        (params && params->tierWeightType >= 0) ? params->tierWeightType : Packer::DEFAULT_TIER_WEIGHT_TYPE;
+        (params && params->tierWeightCustom >= 0) ? params->tierWeightCustom : DEFAULT_TIER_WEIGHT_CUSTOM;
+    int effTierWeightType = (params && params->tierWeightType >= 0) ? params->tierWeightType : DEFAULT_TIER_WEIGHT_TYPE;
     int effTierWeightFunction =
-        (params && params->tierWeightFunction >= 0) ? params->tierWeightFunction : Packer::DEFAULT_TIER_WEIGHT_FUNCTION;
+        (params && params->tierWeightFunction >= 0) ? params->tierWeightFunction : DEFAULT_TIER_WEIGHT_FUNCTION;
     int effTierWeightFlags =
-        (params && params->tierWeightFlags >= 0) ? params->tierWeightFlags : Packer::DEFAULT_TIER_WEIGHT_FLAGS;
+        (params && params->tierWeightFlags >= 0) ? params->tierWeightFlags : DEFAULT_TIER_WEIGHT_FLAGS;
     effTierWeightExact    = std::min(effTierWeightExact, 100);
     effTierWeightCustom   = std::min(effTierWeightCustom, 100);
     effTierWeightType     = std::min(effTierWeightType, 100);
@@ -121,37 +124,35 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
 
     int effFuncSimFoodFoodRestricted  = (params && params->funcSimFoodFoodRestricted >= 0)
                                             ? params->funcSimFoodFoodRestricted
-                                            : Packer::DEFAULT_FUNC_SIM_FOOD_FOOD_RESTRICTED;
+                                            : DEFAULT_FUNC_SIM_FOOD_FOOD_RESTRICTED;
     int effFuncSimFirstaidRobotrepair = (params && params->funcSimFirstaidRobotrepair >= 0)
                                             ? params->funcSimFirstaidRobotrepair
-                                            : Packer::DEFAULT_FUNC_SIM_FIRSTAID_ROBOTREPAIR;
+                                            : DEFAULT_FUNC_SIM_FIRSTAID_ROBOTREPAIR;
     effFuncSimFoodFoodRestricted      = std::min(effFuncSimFoodFoodRestricted, 100);
     effFuncSimFirstaidRobotrepair     = std::min(effFuncSimFirstaidRobotrepair, 100);
 
     // Soft-grouping scale. 0 disables the soft track; otherwise each soft
     // edge contributes shared * pair_weight * soft_pct / 10000.
     int effSoftGroupingPct =
-        (params && params->softGroupingPct >= 0) ? params->softGroupingPct : Packer::DEFAULT_SOFT_GROUPING_PCT;
+        (params && params->softGroupingPct >= 0) ? params->softGroupingPct : DEFAULT_SOFT_GROUPING_PCT;
 
     // Path Relinking: post-restart intensification over per-restart elites.
     // Compiled default off to preserve baseline parity; flip via SearchParams
     // or [features] enable_path_relinking. Guard all PR work beneath this flag
     // so baseline runs are byte-identical.
-    bool enablePathRelinking =
-        (params && params->enablePathRelinking == 1) ||
-        (params && params->enablePathRelinking == -1 && Packer::DEFAULT_ENABLE_PATH_RELINKING != 0);
+    bool enablePathRelinking = (params && params->enablePathRelinking == 1) ||
+                               (params && params->enablePathRelinking == -1 && DEFAULT_ENABLE_PATH_RELINKING != 0);
     int effPathRelinkEliteCap =
-        (params && params->pathRelinkEliteCap > 0) ? params->pathRelinkEliteCap : Packer::DEFAULT_PATH_RELINK_ELITE_CAP;
-    int effPathRelinkDiversityPct = (params && params->pathRelinkDiversityPct >= 0)
-                                        ? params->pathRelinkDiversityPct
-                                        : Packer::DEFAULT_PATH_RELINK_DIVERSITY_PCT;
+        (params && params->pathRelinkEliteCap > 0) ? params->pathRelinkEliteCap : DEFAULT_PATH_RELINK_ELITE_CAP;
+    int effPathRelinkDiversityPct = (params && params->pathRelinkDiversityPct >= 0) ? params->pathRelinkDiversityPct
+                                                                                    : DEFAULT_PATH_RELINK_DIVERSITY_PCT;
     int effPathRelinkMaxPathLen   = (params && params->pathRelinkMaxPathLen > 0) ? params->pathRelinkMaxPathLen : 0;
 
     // Late-biased move generation. alphaQ=0 or uniformPct=100 disables.
     int effLateBiasAlphaQ =
-        (params && params->lateBiasAlphaQ >= 0) ? params->lateBiasAlphaQ : Packer::DEFAULT_LATE_BIAS_ALPHA_Q;
-    int effLateBiasUniformPct = (params && params->lateBiasUniformPct >= 0) ? params->lateBiasUniformPct
-                                                                            : Packer::DEFAULT_LATE_BIAS_UNIFORM_PCT;
+        (params && params->lateBiasAlphaQ >= 0) ? params->lateBiasAlphaQ : DEFAULT_LATE_BIAS_ALPHA_Q;
+    int effLateBiasUniformPct =
+        (params && params->lateBiasUniformPct >= 0) ? params->lateBiasUniformPct : DEFAULT_LATE_BIAS_UNIFORM_PCT;
 
     // Diagnostic counters — populated into *outDiag at the bottom of the function.
     int diagPackCalls                         = 0;
@@ -237,7 +238,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     // Prebuild the PairWeight lookup table once per pack. Soft-track loops
     // inside ComputeGroupingBonus* will O(1) lookup instead of recomputing
     // per LAHC iter. Skipped when the soft track is off.
-    if (effSoftGroupingPct > 0) BuildPairWeightMatrix(ctx, items);
+    if (effSoftGroupingPct > 0) Scoring::BuildPairWeightMatrix(ctx, items);
     else ctx.grouping.pairWeightMatrixN = 0;
 
     // Pre-reservation scan (H > 1 only)
@@ -256,7 +257,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         {
             if (abortFlag && *abortFlag != 0) break;
             int rx = gridW - w;
-            MaxRectsPack(ctx, gridW, gridH, order, target, abortFlag, rx, w);
+            Heuristics::MaxRectsPack(ctx, gridW, gridH, order, target, abortFlag, rx, w);
             ++diagPackCalls;
             if ((int)ctx.placements.size() == (int)items.size())
             {
@@ -289,7 +290,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
 
     // Greedy seed: run BSSF. If enableBafSeed, also run BAF and keep whichever placed more.
     PROF_PHASE_BEGIN(greedy);
-    MaxRectsPack(ctx, gridW, gridH, order, target, abortFlag, bestReserveX, bestReserveW, 0); // BSSF
+    Heuristics::MaxRectsPack(ctx, gridW, gridH, order, target, abortFlag, bestReserveX, bestReserveW, 0); // BSSF
     ++diagPackCalls;
     if (abortFlag && *abortFlag != 0)
     {
@@ -313,7 +314,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
 
     if (enableBafSeed)
     {
-        MaxRectsPack(ctx, gridW, gridH, order, target, abortFlag, bestReserveX, bestReserveW, 1); // BAF
+        Heuristics::MaxRectsPack(ctx, gridW, gridH, order, target, abortFlag, bestReserveX, bestReserveW, 1); // BAF
         ++diagPackCalls;
         if (abortFlag && *abortFlag != 0)
         {
@@ -343,16 +344,16 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     ctx.seedPl = ctx.placements;
     PROF_PHASE_END(greedy, profGreedySeed);
 
-    BuildOccupancyGrid(ctx, gridW, gridH);
+    Grid::BuildOccupancyGrid(ctx, gridW, gridH);
     int seedLerA, seedLerW, seedLerH, seedLerX, seedLerY;
-    ComputeLERCtx(ctx, &ctx.grid[0], gridW, gridH, seedLerA, seedLerW, seedLerH, seedLerX, seedLerY);
+    Ler::ComputeLERCtx(ctx, &ctx.grid[0], gridW, gridH, seedLerA, seedLerW, seedLerH, seedLerX, seedLerY);
     int seedStranded = 0;
-    double seedConc =
-        ComputeConcentrationAndStrandedCtx(ctx, gridW, gridH, seedLerX, seedLerY, seedLerW, seedLerH, seedStranded);
-    int seedNumRot         = CountRotated(ctx.seedPl);
-    long long seedGrouping = ComputeGroupingBonus(ctx.seedPl, items, ctx, effGroupingPower);
-    long long seedScore    = ComputeScore(ctx.seedPl.size(), seedLerA, seedLerH, seedConc, target, seedNumRot,
-                                          seedGrouping, seedStranded, effGroupingWeight, effFragWeight);
+    double seedConc = Ler::ComputeConcentrationAndStrandedCtx(ctx, gridW, gridH, seedLerX, seedLerY, seedLerW, seedLerH,
+                                                              seedStranded);
+    int seedNumRot  = Geometry::CountRotated(ctx.seedPl);
+    long long seedGrouping = Scoring::ComputeGroupingBonus(ctx.seedPl, items, ctx, effGroupingPower);
+    long long seedScore    = Scoring::ComputeScore(ctx.seedPl.size(), seedLerA, seedLerH, seedConc, target, seedNumRot,
+                                                   seedGrouping, seedStranded, effGroupingWeight, effFragWeight);
 
     diagGreedySeedScore   = seedScore;
     diagGreedySeedLerArea = seedLerA;
@@ -408,7 +409,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
 #endif
 
         // Pack the restart seed
-        SkylinePack(ctx, gridW, gridH, curOrder, target, abortFlag, bestReserveX, bestReserveW);
+        Heuristics::SkylinePack(ctx, gridW, gridH, curOrder, target, abortFlag, bestReserveX, bestReserveW);
         ++diagPackCalls;
         if (abortFlag && *abortFlag != 0) break;
         // ctx.grid is maintained incrementally inside SkylinePack — no
@@ -418,17 +419,17 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         int curStranded = 0;
         double curConc  = 0.0;
 #ifdef STACKSORT_PROFILE
-        bool curCacheHit =
-            GridCacheLookup(ctx, gridW, gridH, curLerA, curLerW, curLerH, curLerX, curLerY, curConc, curStranded);
+        bool curCacheHit = Cache::GridCacheLookup(ctx, gridW, gridH, curLerA, curLerW, curLerH, curLerX, curLerY,
+                                                  curConc, curStranded);
         ++diagGridHashProbes;
         if (curCacheHit) ++diagGridHashHits;
 #else
-        GridCacheLookup(ctx, gridW, gridH, curLerA, curLerW, curLerH, curLerX, curLerY, curConc, curStranded);
+        Cache::GridCacheLookup(ctx, gridW, gridH, curLerA, curLerW, curLerH, curLerX, curLerY, curConc, curStranded);
 #endif
-        int curNumRot         = CountRotated(ctx.placements);
-        long long curGrouping = ComputeGroupingBonus(ctx.placements, items, ctx, effGroupingPower);
-        long long curScore    = ComputeScore(ctx.placements.size(), curLerA, curLerH, curConc, target, curNumRot,
-                                             curGrouping, curStranded, effGroupingWeight, effFragWeight);
+        int curNumRot         = Geometry::CountRotated(ctx.placements);
+        long long curGrouping = Scoring::ComputeGroupingBonus(ctx.placements, items, ctx, effGroupingPower);
+        long long curScore = Scoring::ComputeScore(ctx.placements.size(), curLerA, curLerH, curConc, target, curNumRot,
+                                                   curGrouping, curStranded, effGroupingWeight, effFragWeight);
 
         if (curScore > bestScore)
         {
@@ -558,7 +559,8 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
             PROF_TICK(profMoveGen);
 
             // Pack with perturbed order
-            SkylinePack(ctx, gridW, gridH, curOrder, target, abortFlag, bestReserveX, bestReserveW, startIdx);
+            Heuristics::SkylinePack(ctx, gridW, gridH, curOrder, target, abortFlag, bestReserveX, bestReserveW,
+                                    startIdx);
             ++diagPackCalls;
             if (abortFlag && *abortFlag != 0) break;
 
@@ -568,13 +570,13 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
             int candStranded = 0;
             double candConc  = 0.0;
 #ifdef STACKSORT_PROFILE
-            bool candCacheHit = GridCacheLookup(ctx, gridW, gridH, candLerA, candLerW, candLerH, candLerX, candLerY,
-                                                candConc, candStranded);
+            bool candCacheHit = Cache::GridCacheLookup(ctx, gridW, gridH, candLerA, candLerW, candLerH, candLerX,
+                                                       candLerY, candConc, candStranded);
             ++diagGridHashProbes;
             if (candCacheHit) ++diagGridHashHits;
 #else
-            GridCacheLookup(ctx, gridW, gridH, candLerA, candLerW, candLerH, candLerX, candLerY, candConc,
-                            candStranded);
+            Cache::GridCacheLookup(ctx, gridW, gridH, candLerA, candLerW, candLerH, candLerX, candLerY, candConc,
+                                   candStranded);
 #endif
             // profConc's tick is preserved even though the cache attributes
             // all its work to profLer — skipping it would fold those cycles
@@ -582,12 +584,13 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
             PROF_TICK(profLer);
             PROF_TICK(profConc);
 
-            int candNumRot         = CountRotated(ctx.placements);
-            long long candGrouping = ComputeGroupingBonus(ctx.placements, items, ctx, effGroupingPower);
+            int candNumRot         = Geometry::CountRotated(ctx.placements);
+            long long candGrouping = Scoring::ComputeGroupingBonus(ctx.placements, items, ctx, effGroupingPower);
             PROF_TICK(profGrouping);
 
-            long long candScore = ComputeScore(ctx.placements.size(), candLerA, candLerH, candConc, target, candNumRot,
-                                               candGrouping, candStranded, effGroupingWeight, effFragWeight);
+            long long candScore =
+                Scoring::ComputeScore(ctx.placements.size(), candLerA, candLerH, candConc, target, candNumRot,
+                                      candGrouping, candStranded, effGroupingWeight, effFragWeight);
             PROF_TICK(profScore);
 
             // LAHC acceptance
@@ -711,11 +714,12 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         // Rescore under effective weights: PackH hardcodes defaults, bestScore doesn't.
         if (unconResult.allPlaced)
         {
-            long long unGrouping      = ComputeGroupingBonus(unconResult.placements, items, ctx, effGroupingPower);
+            long long unGrouping = Scoring::ComputeGroupingBonus(unconResult.placements, items, ctx, effGroupingPower);
             unconResult.groupingBonus = unGrouping;
-            unconResult.score = ComputeScore(unconResult.placements.size(), unconResult.lerArea, unconResult.lerHeight,
-                                             unconResult.concentration, target, CountRotated(unconResult.placements),
-                                             unGrouping, unconResult.strandedCells, effGroupingWeight, effFragWeight);
+            unconResult.score =
+                Scoring::ComputeScore(unconResult.placements.size(), unconResult.lerArea, unconResult.lerHeight,
+                                      unconResult.concentration, target, Geometry::CountRotated(unconResult.placements),
+                                      unGrouping, unconResult.strandedCells, effGroupingWeight, effFragWeight);
         }
 
         if (unconResult.allPlaced && unconResult.score > bestScore)
@@ -740,27 +744,28 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
 
     PROF_PHASE_BEGIN(stripShift);
     if (enableStripShift)
-        StripShift(ctx.bestPl, items, ctx, gridW, gridH, effGroupingPower, &diagStripShiftStripsFound,
-                   &diagStripShiftStripsImproved);
+        PostPack::StripShift(ctx.bestPl, items, ctx, gridW, gridH, effGroupingPower, &diagStripShiftStripsFound,
+                             &diagStripShiftStripsImproved);
     PROF_PHASE_END(stripShift, profStripShift);
 
     PROF_PHASE_BEGIN(tileSwap);
     if (enableTileSwap)
-        TileSwap(ctx.bestPl, items, ctx, gridW, gridH, effGroupingPower, &diagTileSwapCandidatesFound,
-                 &diagTileSwapCandidatesCommitted);
+        PostPack::TileSwap(ctx.bestPl, items, ctx, gridW, gridH, effGroupingPower, &diagTileSwapCandidatesFound,
+                           &diagTileSwapCandidatesCommitted);
     PROF_PHASE_END(tileSwap, profTileSwap);
 
     PROF_PHASE_BEGIN(optGrp);
-    if (enableOptimizeGrouping) OptimizeGrouping(ctx.bestPl, items, ctx, effGroupingPower);
+    if (enableOptimizeGrouping) PostPack::OptimizeGrouping(ctx.bestPl, items, ctx, effGroupingPower);
     PROF_PHASE_END(optGrp, profOptimizeGrouping);
 
     long long bestGroupingExact = 0;
-    long long bestGrouping      = ComputeGroupingBonus(ctx.bestPl, items, ctx, effGroupingPower, &bestGroupingExact);
+    long long bestGrouping =
+        Scoring::ComputeGroupingBonus(ctx.bestPl, items, ctx, effGroupingPower, &bestGroupingExact);
 
     // Rotated flags relative to original input dims
     for (size_t i = 0; i < ctx.bestPl.size(); ++i)
         ctx.bestPl[i].rotated = (ctx.bestPl[i].w != items[ctx.bestPl[i].id].w);
-    int bestNumRot = CountRotated(ctx.bestPl);
+    int bestNumRot = Geometry::CountRotated(ctx.bestPl);
 
     Result result;
     result.placements    = ctx.bestPl;
@@ -773,8 +778,8 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     result.strandedCells = bestStranded;
     result.groupingBonus = bestGrouping;
     result.allPlaced     = (ctx.bestPl.size() == items.size());
-    result.score = ComputeScore(ctx.bestPl.size(), bestLerA, bestLerH, bestConc, target, bestNumRot, bestGrouping,
-                                bestStranded, effGroupingWeight, effFragWeight);
+    result.score         = Scoring::ComputeScore(ctx.bestPl.size(), bestLerA, bestLerH, bestConc, target, bestNumRot,
+                                                 bestGrouping, bestStranded, effGroupingWeight, effFragWeight);
 
     if (outDiag)
     {
@@ -806,7 +811,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         // Power-independent clustering metric for cross-power CSV/analysis.
         // Computed once per final result, not per LAHC iter.
         PROF_PHASE_BEGIN(bordersRaw);
-        outDiag->groupingBordersRaw = ComputeGroupingBordersRaw(ctx.bestPl, items, ctx);
+        outDiag->groupingBordersRaw = Scoring::ComputeGroupingBordersRaw(ctx.bestPl, items, ctx);
         outDiag->groupingBonusExact = bestGroupingExact;
         PROF_PHASE_END(bordersRaw, profBordersRaw);
 #ifdef STACKSORT_PROFILE
@@ -841,3 +846,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     }
     return result;
 }
+
+} // namespace Search
+
+} // namespace Packer
