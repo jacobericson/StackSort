@@ -431,61 +431,81 @@ class Packer
         unsigned long long hashB;
     };
 
-    // Reusable scratch buffers for the packing hot path. Construct once
-    // per job; pass via Pack/PackAnnealed's reuseCtx to amortize
-    // allocations. Not thread-safe — each worker needs its own.
-    struct PackContext
+    // Skyline arena comfortably covers the 20-wide corpus worst case
+    // (each placement adds at most 2 segments before coalesce).
+    static const int SKYLINE_ARENA_CAP = 128;
+    static const int GRID_CACHE_CAP    = 64;
+    static const int EXACT_ID_CAP      = 512;
+
+    // MAXRECTS working set. Touched only by MaxRectsPack / SplitFreeRects /
+    // PruneFreeRects; dormant once the seed pass finishes.
+    struct MaxRectsScratch
     {
         std::vector<Rect> freeRects;
-        std::vector<Rect> newRects;              // SplitFreeRects scratch
-        std::vector<bool> dead;                  // PruneFreeRects scratch
-        std::vector<Placement> placements;       // packing output
-        std::vector<unsigned char> grid;         // BuildOccupancyGrid
-        std::vector<unsigned char> visited;      // ComputeConcentration
+        std::vector<Rect> newRects;
+        std::vector<bool> dead;
+    };
+
+    // Skyline state as an intrusive singly-linked list over a fixed arena,
+    // plus per-item snapshot log for LAHC prefix restore. Head walks
+    // left-to-right by x; x-order is invariant by construction.
+    struct SkylineState
+    {
+        SkylineNode nodes[SKYLINE_ARENA_CAP];
+        short next[SKYLINE_ARENA_CAP];
+        short head;
+        short freeHead;
+        short count;
+        std::vector<Rect> wasteRects; // under-cliff gaps detected during pack
+
+        // snapValid must be false whenever the log does not correspond to
+        // the current curOrder — restart, abort, or cross-target ctx reuse.
+        std::vector<SkylineBoundary> snapBoundaries;
+        std::vector<Rect> snapWaste;
+        std::vector<SkylineNode> snapSkyline;
+        int snapN;
+        bool snapValid;
+    };
+
+    // LER + concentration/stranded scratch. `visited` stays at the outer
+    // PackContext level because both LER and the repair-move path share it.
+    struct LerScratch
+    {
         std::vector<int> heights;                // ComputeLER histogram
         std::vector<LEREntry> lerStack;          // ComputeLER monotonic stack
         std::vector<int> floodStack;             // Concentration+Stranded DFS
-        std::vector<int> regionAreas;            // Concentration+Stranded: area per region
-        std::vector<int> regionInterior;         // Concentration+Stranded: interior-cell count per region
-        std::vector<unsigned char> regionHasLer; // Concentration+Stranded: LER-connectivity flag per region
-        // Skyline state as an intrusive singly-linked list over a fixed arena.
-        // Head walks left-to-right by x; x-order is invariant by construction.
-        // SKYLINE_ARENA_CAP comfortably covers the 20-wide corpus worst case
-        // (each placement adds at most 2 segments before coalesce).
-        static const int SKYLINE_ARENA_CAP = 128;
-        SkylineNode skylineNodes[SKYLINE_ARENA_CAP];
-        short skylineNext[SKYLINE_ARENA_CAP];
-        short skylineHead;
-        short skylineFreeHead;
-        short skylineCount;
-        std::vector<Rect> wasteRects;     // Skyline waste map (under-cliff gaps)
-        std::vector<int> placementIdGrid; // SkylinePack: placement index per cell (-1 = empty)
+        std::vector<int> regionAreas;            // per-region area
+        std::vector<int> regionInterior;         // per-region interior-cell count
+        std::vector<unsigned char> regionHasLer; // per-region LER-connectivity flag
+    };
 
-        // Per-exactId placement count. 512 cap is a soft limit — exactIds at
-        // or above fall back to full scan (correctness preserved; corpora
-        // stay well under).
-        int typeCount[512];
+    // Zobrist keying + FIFO grid-cache ring for GridCacheLookup. Tables are
+    // pure functions of (gridW, gridH) seeded via splitmix64 with independent
+    // constants per table, so the twin-hash retains 128-bit entropy.
+    // curHashA/B is XOR-maintained incrementally via EmitBoundary; each
+    // SkylineBoundary snapshots the post-placement hash so RestoreSkylineState
+    // can reload it in O(1). `count == 0` is logically empty — stale array
+    // contents never matter, only overwritten on insert.
+    struct GridCache
+    {
+        std::vector<unsigned long long> zobristA;
+        std::vector<unsigned long long> zobristB;
+        int tableW;
+        int tableH;
+        unsigned long long curHashA;
+        unsigned long long curHashB;
+        GridCacheEntry entries[GRID_CACHE_CAP];
+        int count;
+        int ringHead;
+    };
 
-        // LAHC scratch: greedy-seed and best-so-far placements.
-        std::vector<Placement> bssfPl;
-        std::vector<Placement> seedPl;
-        std::vector<Placement> bestPl;
-
-        // Path Relinking elite pool. Orderings captured on global-best
-        // improvements inside the multi-restart LAHC loop; walked pairwise
-        // after the loop exits. Items are normalized on capture (w/h/canRotate
-        // reset from the input items vector) to eliminate MOVE_ROTATE pollution.
-        // eliteScores[i] is the bestScore at capture time — used for diversity
-        // admission and for PR's strict-improvement gate.
-        std::vector<std::vector<Item> > pathRelinkElites;
-        std::vector<long long> pathRelinkEliteScores;
-
-        // Tunables resolved per-pack from SearchParams. Populated in
-        // PackAnnealedH/PackH before calling SkylinePack so the inner loop
-        // doesn't take an extra parameter.
-        int skylineWasteCoef;
-
-        // Grouping tier weights (0..100). Read by PairWeight in the final scorer.
+    // Grouping tier weights, function-similarity overrides, soft-track scale,
+    // and the memoized N*N pair-weight table. Resolved per-pack from
+    // SearchParams; read by PairWeight in the final scorer.
+    // pairWeightMatrixN == 0 → matrix not populated → scoring falls back to
+    // recomputing PairWeight per pair.
+    struct GroupingConfig
+    {
         int tierWeightExact;
         int tierWeightCustom;
         int tierWeightType;
@@ -493,64 +513,75 @@ class Packer
         int tierWeightFlags;
         int funcSimFoodFoodRestricted;
         int funcSimFirstaidRobotrepair;
-
-        // Soft-grouping scale (percent). Feeds the soft track's b^(5/4) components.
         int softGroupingPct;
-
-        // Memoized PairWeight table, row-major [N*N]. Populated by
-        // BuildPairWeightMatrix once per pack when the soft track is active.
-        // pairWeightMatrixN == 0 → not populated → scoring falls back to
-        // recomputing PairWeight per pair.
         std::vector<unsigned char> pairWeightMatrix;
         int pairWeightMatrixN;
+    };
 
-        // FIFO ring. gridCacheCount == 0 is logically empty — stale
-        // array contents never matter, only overwritten on insert.
-        GridCacheEntry gridCache[64];
-        int gridCacheCount;
-        int gridCacheHead;
-
-        // Zobrist keying for GridCacheLookup. Tables are pure functions of
-        // (gridW, gridH) seeded via splitmix64 with independent constants
-        // per table, so the twin-hash retains 128-bit entropy. curHashA/B
-        // is XOR-maintained incrementally via EmitBoundary; each
-        // SkylineBoundary snapshots the post-placement hash so
-        // RestoreSkylineState can reload it in O(1).
-        std::vector<unsigned long long> zobristA;
-        std::vector<unsigned long long> zobristB;
-        unsigned long long curHashA;
-        unsigned long long curHashB;
-        int zobristTableW;
-        int zobristTableH;
-
-        // skylineSnapValid must be false whenever the log does not
-        // correspond to the current curOrder — restart, abort, or
-        // cross-target ctx reuse.
-        std::vector<SkylineBoundary> skylineSnapBoundaries;
-        std::vector<Rect> skylineSnapWaste;
-        std::vector<SkylineNode> skylineSnapSkyline;
-        int skylineSnapN;
-        bool skylineSnapValid;
+    // Path Relinking elite pool. Orderings captured on global-best
+    // improvements inside the multi-restart LAHC loop; walked pairwise
+    // after the loop exits. Items are normalized on capture (w/h/canRotate
+    // reset from the input items vector) to eliminate MOVE_ROTATE pollution.
+    // eliteScores[i] is the bestScore at capture time — used for diversity
+    // admission and for PR's strict-improvement gate.
+    struct PathRelinkPool
+    {
+        std::vector<std::vector<Item> > elites;
+        std::vector<long long> eliteScores;
+    };
 
 #ifdef STACKSORT_PROFILE
-        // SkylinePack prefix-cycle measurement: caller writes the would-be
-        // Phase 3 kept-prefix into profSkylinePrefixK before each call;
-        // SkylinePack stamps TSC at entry and accumulates (tsc_at_item_k -
-        // tsc_start) into profSkylinePrefixCycles. 0 or negative values
-        // skip the measurement (cold seed / restart seed calls).
-        int profSkylinePrefixK;
-        long long profSkylinePrefixCycles;
+    // Per-run rdtsc counters copied into PackDiagnostics at run end.
+    // skylinePrefixK is caller-written: SkylinePack stamps TSC at entry
+    // and accumulates (tsc_at_item_k - tsc_start) into skylinePrefixCycles.
+    // 0 or negative skylinePrefixK skips the measurement (cold seed calls).
+    // Sub-phase accumulators identify which inner component dominates.
+    struct ProfileCounters
+    {
+        int skylinePrefixK;
+        long long skylinePrefixCycles;
+        long long cyclesSkylineWasteMap;  // waste-rect scan + placement
+        long long cyclesSkylineCandidate; // segment walk (maxY + waste)
+        long long cyclesSkylineAdjacency; // CollectAdjacentPids + SharedBorder
+        long long cyclesSkylineCommit;    // place + waste-detect + skyline rebuild
+        long long cyclesLerHistogram;     // per-row heights update
+        long long cyclesLerStack;         // monotonic-stack sweep
+    };
+#endif
 
-        // Sub-phase accumulators. SkylinePack and ComputeLERCtx stamp rdtsc
-        // around the labelled span and add to these; PackAnnealedH copies
-        // them into PackDiagnostics at run end. Help identify which inner
-        // component dominates total cycles so optimization can target it.
-        long long profCyclesSkylineWasteMap;  // waste-rect scan + placement
-        long long profCyclesSkylineCandidate; // segment walk (maxY + waste)
-        long long profCyclesSkylineAdjacency; // CollectAdjacentPids + SharedBorder
-        long long profCyclesSkylineCommit;    // place + waste-detect + skyline rebuild
-        long long profCyclesLerHistogram;     // per-row heights update
-        long long profCyclesLerStack;         // monotonic-stack sweep
+    // Reusable scratch buffers for the packing hot path. Construct once
+    // per job; pass via Pack/PackAnnealed's reuseCtx to amortize
+    // allocations. Not thread-safe — each worker needs its own.
+    struct PackContext
+    {
+        // Cross-cutting outputs and grids — accessed from most TUs.
+        std::vector<Placement> placements;  // packing output
+        std::vector<Placement> bssfPl;      // LAHC best-so-far
+        std::vector<Placement> seedPl;      // LAHC greedy seed
+        std::vector<Placement> bestPl;      // LAHC best result
+        std::vector<unsigned char> grid;    // BuildOccupancyGrid
+        std::vector<unsigned char> visited; // flood-fill marker (LER + repair move)
+        std::vector<int> placementIdGrid;   // SkylinePack: placement index per cell (-1 = empty)
+
+        // Per-exactId placement count. EXACT_ID_CAP is a soft limit —
+        // exactIds at or above fall back to full scan (correctness
+        // preserved; corpora stay well under).
+        int typeCount[EXACT_ID_CAP];
+
+        // Algorithm state, grouped by responsibility.
+        MaxRectsScratch maxRects;
+        SkylineState skyline;
+        LerScratch ler;
+        GridCache cache;
+        GroupingConfig grouping;
+        PathRelinkPool pathRelink;
+
+        // Skyline tiebreaker knob (waste * coef - contact). Not grouping-
+        // related; resolved per-pack from SearchParams.skylineWasteCoef.
+        int skylineWasteCoef;
+
+#ifdef STACKSORT_PROFILE
+        ProfileCounters prof;
 #endif
     };
 
@@ -653,8 +684,9 @@ class Packer
                                   int numRotated, long long groupingBonus, int strandedCells, int groupingWeight,
                                   int fragWeight);
 
-    // Populate ctx.pairWeightMatrix before any per-iter scoring call. Guard
-    // on softGroupingPct > 0 — the matrix is unused when the soft track is off.
+    // Populate ctx.grouping.pairWeightMatrix before any per-iter scoring call.
+    // Guard on softGroupingPct > 0 — the matrix is unused when the soft track
+    // is off.
     static void BuildPairWeightMatrix(PackContext& ctx, const std::vector<Item>& items);
 
     // Split-track grouping bonus. Exact track: union-find on exactId equality,

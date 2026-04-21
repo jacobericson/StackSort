@@ -75,14 +75,14 @@ void TryRepairMove(Packer::PackContext& ctx, int gridW, int gridH, std::vector<P
             int minGY = strandedY, maxGY = strandedY;
             ctx.visited.resize(totalCellsRepair);
             memset(&ctx.visited[0], 0, totalCellsRepair);
-            ctx.floodStack.clear();
-            ctx.floodStack.push_back(strandedY * gridW + strandedX);
+            ctx.ler.floodStack.clear();
+            ctx.ler.floodStack.push_back(strandedY * gridW + strandedX);
             ctx.visited[strandedY * gridW + strandedX] = 1;
             int gapCells                               = 0;
-            while (!ctx.floodStack.empty() && gapCells < 16)
+            while (!ctx.ler.floodStack.empty() && gapCells < 16)
             {
-                int ci = ctx.floodStack.back();
-                ctx.floodStack.pop_back();
+                int ci = ctx.ler.floodStack.back();
+                ctx.ler.floodStack.pop_back();
                 ++gapCells;
                 int cx = ci % gridW;
                 int cy = ci / gridW;
@@ -94,22 +94,22 @@ void TryRepairMove(Packer::PackContext& ctx, int gridW, int gridH, std::vector<P
                 if (cx > 0 && !ctx.visited[ci - 1] && !repairGrid[ci - 1])
                 {
                     ctx.visited[ci - 1] = 1;
-                    ctx.floodStack.push_back(ci - 1);
+                    ctx.ler.floodStack.push_back(ci - 1);
                 }
                 if (cx < gridW - 1 && !ctx.visited[ci + 1] && !repairGrid[ci + 1])
                 {
                     ctx.visited[ci + 1] = 1;
-                    ctx.floodStack.push_back(ci + 1);
+                    ctx.ler.floodStack.push_back(ci + 1);
                 }
                 if (cy > 0 && !ctx.visited[ci - gridW] && !repairGrid[ci - gridW])
                 {
                     ctx.visited[ci - gridW] = 1;
-                    ctx.floodStack.push_back(ci - gridW);
+                    ctx.ler.floodStack.push_back(ci - gridW);
                 }
                 if (cy < gridH - 1 && !ctx.visited[ci + gridW] && !repairGrid[ci + gridW])
                 {
                     ctx.visited[ci + gridW] = 1;
-                    ctx.floodStack.push_back(ci + gridW);
+                    ctx.ler.floodStack.push_back(ci + gridW);
                 }
             }
 

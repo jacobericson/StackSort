@@ -12,35 +12,35 @@ static const int MAX_ADJ = 16;
 static short SkylineAllocNode(Packer::PackContext& ctx)
 {
     short idx;
-    if (ctx.skylineFreeHead >= 0)
+    if (ctx.skyline.freeHead >= 0)
     {
-        idx                 = ctx.skylineFreeHead;
-        ctx.skylineFreeHead = ctx.skylineNext[idx];
+        idx                  = ctx.skyline.freeHead;
+        ctx.skyline.freeHead = ctx.skyline.next[idx];
     }
     else
     {
-        idx = ctx.skylineCount++;
+        idx = ctx.skyline.count++;
     }
-    ctx.skylineNext[idx] = -1;
+    ctx.skyline.next[idx] = -1;
     return idx;
 }
 
 static void SkylineFreeNode(Packer::PackContext& ctx, short idx)
 {
-    ctx.skylineNext[idx] = ctx.skylineFreeHead;
-    ctx.skylineFreeHead  = idx;
+    ctx.skyline.next[idx] = ctx.skyline.freeHead;
+    ctx.skyline.freeHead  = idx;
 }
 
 static void SkylineReset(Packer::PackContext& ctx, int gridW)
 {
-    ctx.skylineHead              = -1;
-    ctx.skylineFreeHead          = -1;
-    ctx.skylineCount             = 0;
-    short head                   = SkylineAllocNode(ctx);
-    ctx.skylineNodes[head].x     = 0;
-    ctx.skylineNodes[head].y     = 0;
-    ctx.skylineNodes[head].width = gridW;
-    ctx.skylineHead              = head;
+    ctx.skyline.head              = -1;
+    ctx.skyline.freeHead          = -1;
+    ctx.skyline.count             = 0;
+    short head                    = SkylineAllocNode(ctx);
+    ctx.skyline.nodes[head].x     = 0;
+    ctx.skyline.nodes[head].y     = 0;
+    ctx.skyline.nodes[head].width = gridW;
+    ctx.skyline.head              = head;
 }
 
 // Commit-time boundary snapshot. Skyline, waste, and hash state are already
@@ -54,20 +54,21 @@ static void EmitBoundary(Packer::PackContext& ctx, int /*gridW*/, int /*placeX*/
 {
     Packer::SkylineBoundary b;
     b.placementsCount = (int)ctx.placements.size();
-    b.wasteStart      = (int)ctx.skylineSnapWaste.size();
-    b.wasteCount      = (int)ctx.wasteRects.size();
-    ctx.skylineSnapWaste.insert(ctx.skylineSnapWaste.end(), ctx.wasteRects.begin(), ctx.wasteRects.end());
-    b.skylineStart   = (int)ctx.skylineSnapSkyline.size();
+    b.wasteStart      = (int)ctx.skyline.snapWaste.size();
+    b.wasteCount      = (int)ctx.skyline.wasteRects.size();
+    ctx.skyline.snapWaste.insert(ctx.skyline.snapWaste.end(), ctx.skyline.wasteRects.begin(),
+                                 ctx.skyline.wasteRects.end());
+    b.skylineStart   = (int)ctx.skyline.snapSkyline.size();
     int skylineCount = 0;
-    for (short s = ctx.skylineHead; s >= 0; s = ctx.skylineNext[s])
+    for (short s = ctx.skyline.head; s >= 0; s = ctx.skyline.next[s])
     {
-        ctx.skylineSnapSkyline.push_back(ctx.skylineNodes[s]);
+        ctx.skyline.snapSkyline.push_back(ctx.skyline.nodes[s]);
         ++skylineCount;
     }
     b.skylineCount = skylineCount;
-    b.hashA        = ctx.curHashA;
-    b.hashB        = ctx.curHashB;
-    ctx.skylineSnapBoundaries.push_back(b);
+    b.hashA        = ctx.cache.curHashA;
+    b.hashB        = ctx.cache.curHashB;
+    ctx.skyline.snapBoundaries.push_back(b);
 }
 
 void Packer::CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>& /*items*/, int curExactId, int start,
@@ -109,7 +110,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         ctx.placements.clear();
         SkylineReset(ctx, gridW);
 
-        ctx.wasteRects.clear();
+        ctx.skyline.wasteRects.clear();
 
         ctx.placementIdGrid.resize(totalCells);
         memset(&ctx.placementIdGrid[0], 0xFF, totalCells * sizeof(int));
@@ -120,12 +121,12 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         ctx.grid.resize(totalCells);
         memset(&ctx.grid[0], 0, totalCells);
 
-        ctx.skylineSnapBoundaries.clear();
-        ctx.skylineSnapWaste.clear();
-        ctx.skylineSnapSkyline.clear();
+        ctx.skyline.snapBoundaries.clear();
+        ctx.skyline.snapWaste.clear();
+        ctx.skyline.snapSkyline.clear();
         memset(ctx.typeCount, 0, sizeof(ctx.typeCount));
-        ctx.curHashA = 0;
-        ctx.curHashB = 0;
+        ctx.cache.curHashA = 0;
+        ctx.cache.curHashB = 0;
         EmitBoundary(ctx, gridW, 0, 0, 0, 0);
     }
     else
@@ -140,14 +141,14 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
 
 #ifdef STACKSORT_PROFILE
     unsigned long long _sklStartTsc = __rdtsc();
-    int _prefixK                    = ctx.profSkylinePrefixK;
+    int _prefixK                    = ctx.prof.skylinePrefixK;
 #endif
 
     for (size_t idx = (size_t)startIdx; idx < items.size(); ++idx)
     {
         if (abortFlag && *abortFlag != 0)
         {
-            ctx.skylineSnapValid = false;
+            ctx.skyline.snapValid = false;
             return;
         }
 
@@ -155,7 +156,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         if ((int)idx == _prefixK)
         {
             unsigned long long _now = __rdtsc();
-            ctx.profSkylinePrefixCycles += (long long)(_now - _sklStartTsc);
+            ctx.prof.skylinePrefixCycles += (long long)(_now - _sklStartTsc);
         }
 #endif
 
@@ -169,9 +170,9 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         int wasteW = 0, wasteH = 0;
         bool wasteRotated = false;
 
-        for (size_t wi = 0; wi < ctx.wasteRects.size(); ++wi)
+        for (size_t wi = 0; wi < ctx.skyline.wasteRects.size(); ++wi)
         {
-            const Rect& wr = ctx.wasteRects[wi];
+            const Rect& wr = ctx.skyline.wasteRects[wi];
             for (int ori = 0; ori < numOriW; ++ori)
             {
                 int tw = (ori == 0) ? item.w : item.h;
@@ -189,7 +190,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
 
         if (bestWasteIdx >= 0)
         {
-            const Rect& wr = ctx.wasteRects[bestWasteIdx];
+            const Rect& wr = ctx.skyline.wasteRects[bestWasteIdx];
             Placement p;
             p.id      = item.id;
             p.exactId = item.exactId;
@@ -203,23 +204,23 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
 
             {
                 int pidx                     = (int)ctx.placements.size() - 1;
-                const unsigned long long* zA = &ctx.zobristA[0];
-                const unsigned long long* zB = &ctx.zobristB[0];
+                const unsigned long long* zA = &ctx.cache.zobristA[0];
+                const unsigned long long* zB = &ctx.cache.zobristB[0];
                 for (int dy = 0; dy < p.h; ++dy)
                     for (int dx = 0; dx < p.w; ++dx)
                     {
                         int cellIdx                  = (p.y + dy) * gridW + (p.x + dx);
                         ctx.placementIdGrid[cellIdx] = pidx;
                         ctx.grid[cellIdx]            = 1;
-                        ctx.curHashA ^= zA[cellIdx];
-                        ctx.curHashB ^= zB[cellIdx];
+                        ctx.cache.curHashA ^= zA[cellIdx];
+                        ctx.cache.curHashB ^= zB[cellIdx];
                     }
             }
 
             int remRightW  = wr.w - wasteW;
             int remBottomH = wr.h - wasteH;
             int wrx = wr.x, wry = wr.y, wrh = wr.h;
-            ctx.wasteRects.erase(ctx.wasteRects.begin() + bestWasteIdx);
+            ctx.skyline.wasteRects.erase(ctx.skyline.wasteRects.begin() + bestWasteIdx);
             if (remRightW > 0)
             {
                 Rect r;
@@ -227,7 +228,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                 r.y = wry;
                 r.w = remRightW;
                 r.h = wrh;
-                ctx.wasteRects.push_back(r);
+                ctx.skyline.wasteRects.push_back(r);
             }
             if (remBottomH > 0)
             {
@@ -236,13 +237,13 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                 r.y = wry + wasteH;
                 r.w = wasteW;
                 r.h = remBottomH;
-                ctx.wasteRects.push_back(r);
+                ctx.skyline.wasteRects.push_back(r);
             }
             EmitBoundary(ctx, gridW, p.x, p.y, p.w, p.h);
-            SUBPHASE_END(ws, ctx.profCyclesSkylineWasteMap);
+            SUBPHASE_END(ws, ctx.prof.cyclesSkylineWasteMap);
             continue;
         }
-        SUBPHASE_END(ws, ctx.profCyclesSkylineWasteMap);
+        SUBPHASE_END(ws, ctx.prof.cyclesSkylineWasteMap);
 
         bool tryRotate = item.canRotate && item.w != item.h;
         int numOri     = tryRotate ? 2 : 1;
@@ -271,9 +272,9 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                 int iw = (ori == 0) ? item.w : item.h;
                 int ih = (ori == 0) ? item.h : item.w;
 
-                for (short si = ctx.skylineHead; si >= 0; si = ctx.skylineNext[si])
+                for (short si = ctx.skyline.head; si >= 0; si = ctx.skyline.next[si])
                 {
-                    int x = ctx.skylineNodes[si].x;
+                    int x = ctx.skyline.nodes[si].x;
                     if (x + iw > gridW) continue;
                     SUBPHASE_BEGIN(cand);
 
@@ -291,7 +292,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                     // maxAllowedY means ih exceeds the per-x ceiling.
                     if (maxAllowedY < 0)
                     {
-                        SUBPHASE_END(cand, ctx.profCyclesSkylineCandidate);
+                        SUBPHASE_END(cand, ctx.prof.cyclesSkylineCandidate);
                         continue;
                     }
 
@@ -308,9 +309,9 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                     // loop runs until overlapRight covers x + iw (fit) or
                     // we walk off the skyline tail (no fit).
                     int xEnd = x + iw;
-                    for (short sj = si; sj >= 0; sj = ctx.skylineNext[sj])
+                    for (short sj = si; sj >= 0; sj = ctx.skyline.next[sj])
                     {
-                        int segY = ctx.skylineNodes[sj].y;
+                        int segY = ctx.skyline.nodes[sj].y;
                         if (segY > maxY)
                         {
                             maxY = segY;
@@ -320,8 +321,8 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                                 break;
                             }
                         }
-                        int segLeft      = ctx.skylineNodes[sj].x;
-                        int segRight     = segLeft + ctx.skylineNodes[sj].width;
+                        int segLeft      = ctx.skyline.nodes[sj].x;
+                        int segRight     = segLeft + ctx.skyline.nodes[sj].width;
                         int overlapRight = (xEnd < segRight) ? xEnd : segRight;
                         areaUnder += (overlapRight - segLeft) * segY;
                         if (overlapRight >= xEnd)
@@ -333,7 +334,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
 
                     if (aborted || !covered)
                     {
-                        SUBPHASE_END(cand, ctx.profCyclesSkylineCandidate);
+                        SUBPHASE_END(cand, ctx.prof.cyclesSkylineCandidate);
                         continue;
                     }
 
@@ -342,10 +343,10 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                     long long maxContact = 2LL * (iw + ih) + MAX_ADJ;
                     if (maxY == bestY && (long long)waste * ctx.skylineWasteCoef - maxContact > bestCombined)
                     {
-                        SUBPHASE_END(cand, ctx.profCyclesSkylineCandidate);
+                        SUBPHASE_END(cand, ctx.prof.cyclesSkylineCandidate);
                         continue;
                     }
-                    SUBPHASE_END(cand, ctx.profCyclesSkylineCandidate);
+                    SUBPHASE_END(cand, ctx.prof.cyclesSkylineCandidate);
 
                     SUBPHASE_BEGIN(adj);
                     int adjPids[MAX_ADJ];
@@ -392,7 +393,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
                         bestH        = ih;
                         bestRotated  = (ori != 0);
                     }
-                    SUBPHASE_END(adj, ctx.profCyclesSkylineAdjacency);
+                    SUBPHASE_END(adj, ctx.prof.cyclesSkylineAdjacency);
                 }
             }
         }
@@ -401,7 +402,7 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         {
             SUBPHASE_BEGIN(cmt);
             EmitBoundary(ctx, gridW, 0, 0, 0, 0);
-            SUBPHASE_END(cmt, ctx.profCyclesSkylineCommit);
+            SUBPHASE_END(cmt, ctx.prof.cyclesSkylineCommit);
             continue;
         }
 
@@ -419,16 +420,16 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
 
         {
             int pidx                     = (int)ctx.placements.size() - 1;
-            const unsigned long long* zA = &ctx.zobristA[0];
-            const unsigned long long* zB = &ctx.zobristB[0];
+            const unsigned long long* zA = &ctx.cache.zobristA[0];
+            const unsigned long long* zB = &ctx.cache.zobristB[0];
             for (int dy = 0; dy < bestH; ++dy)
                 for (int dx = 0; dx < bestW; ++dx)
                 {
                     int cellIdx                  = (bestY + dy) * gridW + (bestX + dx);
                     ctx.placementIdGrid[cellIdx] = pidx;
                     ctx.grid[cellIdx]            = 1;
-                    ctx.curHashA ^= zA[cellIdx];
-                    ctx.curHashB ^= zB[cellIdx];
+                    ctx.cache.curHashA ^= zA[cellIdx];
+                    ctx.cache.curHashB ^= zB[cellIdx];
                 }
         }
 
@@ -436,24 +437,24 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         int placeRight = bestX + bestW;
         int placeTop   = bestY + bestH;
 
-        for (short sj = ctx.skylineHead; sj >= 0; sj = ctx.skylineNext[sj])
+        for (short sj = ctx.skyline.head; sj >= 0; sj = ctx.skyline.next[sj])
         {
-            int segLeft  = ctx.skylineNodes[sj].x;
-            int segRight = segLeft + ctx.skylineNodes[sj].width;
+            int segLeft  = ctx.skyline.nodes[sj].x;
+            int segRight = segLeft + ctx.skyline.nodes[sj].width;
             if (segRight <= placeLeft || segLeft >= placeRight) continue;
 
             int overlapLeft  = (placeLeft > segLeft) ? placeLeft : segLeft;
             int overlapRight = (placeRight < segRight) ? placeRight : segRight;
             int overlapW     = overlapRight - overlapLeft;
-            int gapH         = bestY - ctx.skylineNodes[sj].y;
+            int gapH         = bestY - ctx.skyline.nodes[sj].y;
             if (overlapW > 0 && gapH > 0)
             {
                 Rect waste;
                 waste.x = overlapLeft;
-                waste.y = ctx.skylineNodes[sj].y;
+                waste.y = ctx.skyline.nodes[sj].y;
                 waste.w = overlapW;
                 waste.h = gapH;
-                ctx.wasteRects.push_back(waste);
+                ctx.skyline.wasteRects.push_back(waste);
             }
         }
 
@@ -462,13 +463,13 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
         // with same-y neighbours. Prev walks with cur so unlinks relink
         // prev->next in O(1).
         short insertAfter = -1;
-        short cur         = ctx.skylineHead;
+        short cur         = ctx.skyline.head;
         short prev        = -1;
         while (cur >= 0)
         {
-            int segLeft  = ctx.skylineNodes[cur].x;
-            int segRight = segLeft + ctx.skylineNodes[cur].width;
-            short next   = ctx.skylineNext[cur];
+            int segLeft  = ctx.skyline.nodes[cur].x;
+            int segRight = segLeft + ctx.skyline.nodes[cur].width;
+            short next   = ctx.skyline.next[cur];
 
             if (segRight <= placeLeft)
             {
@@ -487,78 +488,78 @@ void Packer::SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vect
 
             if (hasLeft && hasRight)
             {
-                ctx.skylineNodes[cur].width      = placeLeft - segLeft;
-                short rightIdx                   = SkylineAllocNode(ctx);
-                ctx.skylineNodes[rightIdx].x     = placeRight;
-                ctx.skylineNodes[rightIdx].y     = ctx.skylineNodes[cur].y;
-                ctx.skylineNodes[rightIdx].width = segRight - placeRight;
-                ctx.skylineNext[rightIdx]        = next;
-                ctx.skylineNext[cur]             = rightIdx;
-                insertAfter                      = cur;
-                prev                             = rightIdx;
-                cur                              = next;
+                ctx.skyline.nodes[cur].width      = placeLeft - segLeft;
+                short rightIdx                    = SkylineAllocNode(ctx);
+                ctx.skyline.nodes[rightIdx].x     = placeRight;
+                ctx.skyline.nodes[rightIdx].y     = ctx.skyline.nodes[cur].y;
+                ctx.skyline.nodes[rightIdx].width = segRight - placeRight;
+                ctx.skyline.next[rightIdx]        = next;
+                ctx.skyline.next[cur]             = rightIdx;
+                insertAfter                       = cur;
+                prev                              = rightIdx;
+                cur                               = next;
             }
             else if (hasLeft)
             {
-                ctx.skylineNodes[cur].width = placeLeft - segLeft;
-                insertAfter                 = cur;
-                prev                        = cur;
-                cur                         = next;
+                ctx.skyline.nodes[cur].width = placeLeft - segLeft;
+                insertAfter                  = cur;
+                prev                         = cur;
+                cur                          = next;
             }
             else if (hasRight)
             {
-                ctx.skylineNodes[cur].x     = placeRight;
-                ctx.skylineNodes[cur].width = segRight - placeRight;
-                prev                        = cur;
-                cur                         = next;
+                ctx.skyline.nodes[cur].x     = placeRight;
+                ctx.skyline.nodes[cur].width = segRight - placeRight;
+                prev                         = cur;
+                cur                          = next;
             }
             else
             {
-                if (prev < 0) ctx.skylineHead = next;
-                else ctx.skylineNext[prev] = next;
+                if (prev < 0) ctx.skyline.head = next;
+                else ctx.skyline.next[prev] = next;
                 SkylineFreeNode(ctx, cur);
                 cur = next;
             }
         }
 
-        short itemSeg                   = SkylineAllocNode(ctx);
-        ctx.skylineNodes[itemSeg].x     = placeLeft;
-        ctx.skylineNodes[itemSeg].y     = placeTop;
-        ctx.skylineNodes[itemSeg].width = bestW;
+        short itemSeg                    = SkylineAllocNode(ctx);
+        ctx.skyline.nodes[itemSeg].x     = placeLeft;
+        ctx.skyline.nodes[itemSeg].y     = placeTop;
+        ctx.skyline.nodes[itemSeg].width = bestW;
 
         if (insertAfter < 0)
         {
-            ctx.skylineNext[itemSeg] = ctx.skylineHead;
-            ctx.skylineHead          = itemSeg;
+            ctx.skyline.next[itemSeg] = ctx.skyline.head;
+            ctx.skyline.head          = itemSeg;
         }
         else
         {
-            ctx.skylineNext[itemSeg]     = ctx.skylineNext[insertAfter];
-            ctx.skylineNext[insertAfter] = itemSeg;
+            ctx.skyline.next[itemSeg]     = ctx.skyline.next[insertAfter];
+            ctx.skyline.next[insertAfter] = itemSeg;
         }
 
-        if (insertAfter >= 0 && ctx.skylineNodes[insertAfter].y == placeTop &&
-            ctx.skylineNodes[insertAfter].x + ctx.skylineNodes[insertAfter].width == placeLeft)
+        if (insertAfter >= 0 && ctx.skyline.nodes[insertAfter].y == placeTop &&
+            ctx.skyline.nodes[insertAfter].x + ctx.skyline.nodes[insertAfter].width == placeLeft)
         {
-            ctx.skylineNodes[insertAfter].width += ctx.skylineNodes[itemSeg].width;
-            ctx.skylineNext[insertAfter] = ctx.skylineNext[itemSeg];
+            ctx.skyline.nodes[insertAfter].width += ctx.skyline.nodes[itemSeg].width;
+            ctx.skyline.next[insertAfter] = ctx.skyline.next[itemSeg];
             SkylineFreeNode(ctx, itemSeg);
             itemSeg = insertAfter;
         }
 
-        short succ = ctx.skylineNext[itemSeg];
-        if (succ >= 0 && ctx.skylineNodes[succ].y == ctx.skylineNodes[itemSeg].y &&
-            ctx.skylineNodes[itemSeg].x + ctx.skylineNodes[itemSeg].width == ctx.skylineNodes[succ].x)
+        short succ = ctx.skyline.next[itemSeg];
+        if (succ >= 0 && ctx.skyline.nodes[succ].y == ctx.skyline.nodes[itemSeg].y &&
+            ctx.skyline.nodes[itemSeg].x + ctx.skyline.nodes[itemSeg].width == ctx.skyline.nodes[succ].x)
         {
-            ctx.skylineNodes[itemSeg].width += ctx.skylineNodes[succ].width;
-            ctx.skylineNext[itemSeg] = ctx.skylineNext[succ];
+            ctx.skyline.nodes[itemSeg].width += ctx.skyline.nodes[succ].width;
+            ctx.skyline.next[itemSeg] = ctx.skyline.next[succ];
             SkylineFreeNode(ctx, succ);
         }
 
         EmitBoundary(ctx, gridW, bestX, bestY, bestW, bestH);
-        SUBPHASE_END(cmt, ctx.profCyclesSkylineCommit);
+        SUBPHASE_END(cmt, ctx.prof.cyclesSkylineCommit);
     }
 
-    ctx.skylineSnapN     = (int)items.size();
-    ctx.skylineSnapValid = true;
+    ctx.skyline.snapN     = (int)items.size();
+    ctx.skyline.snapValid = true;
 }

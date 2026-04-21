@@ -10,15 +10,15 @@ void Packer::BuildPairWeightMatrix(PackContext& ctx, const std::vector<Item>& it
     int n = (int)items.size();
     // assign() overwrites in place when capacity >= n*n; InitPackContext
     // reserved exactly that much, so this is a memset, not an allocation.
-    ctx.pairWeightMatrix.assign((size_t)n * (size_t)n, (unsigned char)0);
-    ctx.pairWeightMatrixN = n;
+    ctx.grouping.pairWeightMatrix.assign((size_t)n * (size_t)n, (unsigned char)0);
+    ctx.grouping.pairWeightMatrixN = n;
     for (int i = 0; i < n; ++i)
     {
         for (int j = i + 1; j < n; ++j)
         {
             unsigned char w = (unsigned char)PairWeight(items[i], items[j], ctx);
-            ctx.pairWeightMatrix[(size_t)i * (size_t)n + (size_t)j] = w;
-            ctx.pairWeightMatrix[(size_t)j * (size_t)n + (size_t)i] = w;
+            ctx.grouping.pairWeightMatrix[(size_t)i * (size_t)n + (size_t)j] = w;
+            ctx.grouping.pairWeightMatrix[(size_t)j * (size_t)n + (size_t)i] = w;
         }
     }
 }
@@ -76,9 +76,10 @@ void Packer::AccumulateGroupingComponents(const std::vector<Placement>& placemen
         softCompBorders[i] = 0;
     }
 
-    bool softActive              = ctx.softGroupingPct > 0;
-    const int matN               = ctx.pairWeightMatrixN;
-    const unsigned char* matBase = softActive && (matN > 0) ? &ctx.pairWeightMatrix[0] : (const unsigned char*)0;
+    bool softActive = ctx.grouping.softGroupingPct > 0;
+    const int matN  = ctx.grouping.pairWeightMatrixN;
+    const unsigned char* matBase =
+        softActive && (matN > 0) ? &ctx.grouping.pairWeightMatrix[0] : (const unsigned char*)0;
 
     if (g != NULL)
     {
@@ -249,7 +250,7 @@ long long Packer::ComputeGroupingBonusAdj(const std::vector<Placement>& placemen
     int parent[256], compBorders[256], softParent[256], softCompBorders[256];
     AccumulateGroupingComponents(placements, items, ctx, n, &g, parent, compBorders, softParent, softCompBorders);
     return FinalizeGroupingBonus(n, parent, compBorders, softParent, softCompBorders, groupingPowerQuarters, 5,
-                                 ctx.softGroupingPct, NULL);
+                                 ctx.grouping.softGroupingPct, NULL);
 }
 
 // O(n²) scorer without a prebuilt graph. Used by the LAHC inner loop where
@@ -266,7 +267,7 @@ long long Packer::ComputeGroupingBonus(const std::vector<Placement>& placements,
     int parent[256], compBorders[256], softParent[256], softCompBorders[256];
     AccumulateGroupingComponents(placements, items, ctx, n, NULL, parent, compBorders, softParent, softCompBorders);
     return FinalizeGroupingBonus(n, parent, compBorders, softParent, softCompBorders, groupingPowerQuarters, 5,
-                                 ctx.softGroupingPct, outExactOnly);
+                                 ctx.grouping.softGroupingPct, outExactOnly);
 }
 
 // Power-independent border total. Sums weighted Σ b per component with no
@@ -279,7 +280,8 @@ long long Packer::ComputeGroupingBordersRaw(const std::vector<Placement>& placem
     if (n <= 1 || n > 256) return 0;
     int parent[256], compBorders[256], softParent[256], softCompBorders[256];
     AccumulateGroupingComponents(placements, items, ctx, n, NULL, parent, compBorders, softParent, softCompBorders);
-    return FinalizeGroupingBonus(n, parent, compBorders, softParent, softCompBorders, 4, 4, ctx.softGroupingPct, NULL);
+    return FinalizeGroupingBonus(n, parent, compBorders, softParent, softCompBorders, 4, 4,
+                                 ctx.grouping.softGroupingPct, NULL);
 }
 
 // Swap same-footprint items to improve clustering.

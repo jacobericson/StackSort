@@ -15,9 +15,9 @@ void Packer::ComputeLERCtx(PackContext& ctx, const unsigned char* grid, int grid
 
     if (gridW <= 0 || gridH <= 0) return;
 
-    ctx.heights.assign(gridW, 0);
-    int* heights    = &ctx.heights[0];
-    LEREntry* stack = &ctx.lerStack[0];
+    ctx.ler.heights.assign(gridW, 0);
+    int* heights    = &ctx.ler.heights[0];
+    LEREntry* stack = &ctx.ler.lerStack[0];
 
     for (int y = 0; y < gridH; ++y)
     {
@@ -29,7 +29,7 @@ void Packer::ComputeLERCtx(PackContext& ctx, const unsigned char* grid, int grid
             heights[x] = (grid[rowOffset + x] == 0) ? heights[x] + 1 : 0;
             maxHeight  = std::max(maxHeight, heights[x]);
         }
-        SUBPHASE_END(hist, ctx.profCyclesLerHistogram);
+        SUBPHASE_END(hist, ctx.prof.cyclesLerHistogram);
 
         // Any rectangle with its bottom at row y is bounded above by
         // gridW * maxHeight. If that's already <= the best so far, the
@@ -67,7 +67,7 @@ void Packer::ComputeLERCtx(PackContext& ctx, const unsigned char* grid, int grid
             stack[stackTop].height   = curHeight;
             ++stackTop;
         }
-        SUBPHASE_END(stk, ctx.profCyclesLerStack);
+        SUBPHASE_END(stk, ctx.prof.cyclesLerStack);
     }
 }
 
@@ -93,11 +93,11 @@ double Packer::ComputeConcentrationAndStrandedCtx(PackContext& ctx, int gridW, i
     ctx.visited.resize(totalCells);
     memset(&ctx.visited[0], 0, totalCells);
     // External clear() can drop size; reclaim for raw-pointer indexing.
-    if ((int)ctx.floodStack.size() < totalCells) ctx.floodStack.resize(totalCells);
-    ctx.regionAreas.clear();
-    ctx.regionInterior.clear();
-    ctx.regionHasLer.clear();
-    int* flood                   = &ctx.floodStack[0];
+    if ((int)ctx.ler.floodStack.size() < totalCells) ctx.ler.floodStack.resize(totalCells);
+    ctx.ler.regionAreas.clear();
+    ctx.ler.regionInterior.clear();
+    ctx.ler.regionHasLer.clear();
+    int* flood                   = &ctx.ler.floodStack[0];
     unsigned char* vis           = &ctx.visited[0];
     const unsigned char* gridPtr = &ctx.grid[0];
     int totalFree                = 0;
@@ -155,9 +155,9 @@ double Packer::ComputeConcentrationAndStrandedCtx(PackContext& ctx, int gridW, i
             }
         }
 
-        ctx.regionAreas.push_back(area);
-        ctx.regionInterior.push_back(interior);
-        ctx.regionHasLer.push_back(hasLer);
+        ctx.ler.regionAreas.push_back(area);
+        ctx.ler.regionInterior.push_back(interior);
+        ctx.ler.regionHasLer.push_back(hasLer);
         totalFree += area;
     }
 
@@ -166,9 +166,9 @@ double Packer::ComputeConcentrationAndStrandedCtx(PackContext& ctx, int gridW, i
     // every region contributes, matching legacy's "all interior cells
     // stranded when no LER" behavior.
     int stranded = 0;
-    for (size_t r = 0; r < ctx.regionAreas.size(); ++r)
+    for (size_t r = 0; r < ctx.ler.regionAreas.size(); ++r)
     {
-        if (!ctx.regionHasLer[r]) stranded += ctx.regionInterior[r];
+        if (!ctx.ler.regionHasLer[r]) stranded += ctx.ler.regionInterior[r];
     }
     outStrandedCells = stranded;
 
@@ -179,9 +179,9 @@ double Packer::ComputeConcentrationAndStrandedCtx(PackContext& ctx, int gridW, i
     // amplified by ComputeScore's groupingBonus*concentration*groupingWeight
     // multiply chain into visible long long score differences.
     double hhi = 0.0;
-    for (size_t r = 0; r < ctx.regionAreas.size(); ++r)
+    for (size_t r = 0; r < ctx.ler.regionAreas.size(); ++r)
     {
-        double share = (double)ctx.regionAreas[r] / (double)totalFree;
+        double share = (double)ctx.ler.regionAreas[r] / (double)totalFree;
         hhi += share * share;
     }
     return hhi;
@@ -201,8 +201,8 @@ void Packer::FloodFillFromLer(PackContext& ctx, int gridW, int gridH, int lerX, 
     ctx.visited.resize(totalCells);
     memset(&ctx.visited[0], 0, totalCells);
     // External clear() can drop size; reclaim for raw-pointer indexing.
-    if ((int)ctx.floodStack.size() < totalCells) ctx.floodStack.resize(totalCells);
-    int* flood                   = &ctx.floodStack[0];
+    if ((int)ctx.ler.floodStack.size() < totalCells) ctx.ler.floodStack.resize(totalCells);
+    int* flood                   = &ctx.ler.floodStack[0];
     unsigned char* vis           = &ctx.visited[0];
     const unsigned char* gridPtr = extGrid ? extGrid : &ctx.grid[0];
     int floodTop                 = 0;
@@ -253,7 +253,7 @@ void Packer::ComputeLER(const std::vector<unsigned char>& grid, int gridW, int g
                         int& outHeight, int& outX, int& outY)
 {
     PackContext ctx;
-    ctx.heights.resize(gridW);
-    ctx.lerStack.resize(gridW + 1);
+    ctx.ler.heights.resize(gridW);
+    ctx.ler.lerStack.resize(gridW + 1);
     ComputeLERCtx(ctx, &grid[0], gridW, gridH, outArea, outWidth, outHeight, outX, outY);
 }

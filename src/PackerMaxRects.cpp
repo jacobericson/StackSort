@@ -15,15 +15,15 @@ bool Packer::Contains(const Rect& outer, const Rect& inner)
 
 void Packer::SplitFreeRects(PackContext& ctx, const Rect& placed)
 {
-    ctx.newRects.clear();
+    ctx.maxRects.newRects.clear();
 
-    for (size_t i = 0; i < ctx.freeRects.size(); ++i)
+    for (size_t i = 0; i < ctx.maxRects.freeRects.size(); ++i)
     {
-        const Rect& fr = ctx.freeRects[i];
+        const Rect& fr = ctx.maxRects.freeRects[i];
 
         if (!Overlaps(fr, placed))
         {
-            ctx.newRects.push_back(fr);
+            ctx.maxRects.newRects.push_back(fr);
             continue;
         }
 
@@ -35,7 +35,7 @@ void Packer::SplitFreeRects(PackContext& ctx, const Rect& placed)
             r.y = fr.y;
             r.w = placed.x - fr.x;
             r.h = fr.h;
-            ctx.newRects.push_back(r);
+            ctx.maxRects.newRects.push_back(r);
         }
 
         // Right remainder
@@ -46,7 +46,7 @@ void Packer::SplitFreeRects(PackContext& ctx, const Rect& placed)
             r.y = fr.y;
             r.w = (fr.x + fr.w) - (placed.x + placed.w);
             r.h = fr.h;
-            ctx.newRects.push_back(r);
+            ctx.maxRects.newRects.push_back(r);
         }
 
         // Top remainder
@@ -57,7 +57,7 @@ void Packer::SplitFreeRects(PackContext& ctx, const Rect& placed)
             r.y = fr.y;
             r.w = fr.w;
             r.h = placed.y - fr.y;
-            ctx.newRects.push_back(r);
+            ctx.maxRects.newRects.push_back(r);
         }
 
         // Bottom remainder
@@ -68,31 +68,31 @@ void Packer::SplitFreeRects(PackContext& ctx, const Rect& placed)
             r.y = placed.y + placed.h;
             r.w = fr.w;
             r.h = (fr.y + fr.h) - (placed.y + placed.h);
-            ctx.newRects.push_back(r);
+            ctx.maxRects.newRects.push_back(r);
         }
     }
 
-    ctx.freeRects.swap(ctx.newRects);
+    ctx.maxRects.freeRects.swap(ctx.maxRects.newRects);
 }
 
 void Packer::PruneFreeRects(PackContext& ctx)
 {
-    size_t n = ctx.freeRects.size();
-    ctx.dead.assign(n, false);
+    size_t n = ctx.maxRects.freeRects.size();
+    ctx.maxRects.dead.assign(n, false);
 
     for (size_t i = 0; i < n; ++i)
     {
-        if (ctx.dead[i]) continue;
+        if (ctx.maxRects.dead[i]) continue;
         for (size_t j = i + 1; j < n; ++j)
         {
-            if (ctx.dead[j]) continue;
-            if (Contains(ctx.freeRects[i], ctx.freeRects[j]))
+            if (ctx.maxRects.dead[j]) continue;
+            if (Contains(ctx.maxRects.freeRects[i], ctx.maxRects.freeRects[j]))
             {
-                ctx.dead[j] = true;
+                ctx.maxRects.dead[j] = true;
             }
-            else if (Contains(ctx.freeRects[j], ctx.freeRects[i]))
+            else if (Contains(ctx.maxRects.freeRects[j], ctx.maxRects.freeRects[i]))
             {
-                ctx.dead[i] = true;
+                ctx.maxRects.dead[i] = true;
                 break;
             }
         }
@@ -101,9 +101,9 @@ void Packer::PruneFreeRects(PackContext& ctx)
     size_t write = 0;
     for (size_t read = 0; read < n; ++read)
     {
-        if (!ctx.dead[read]) ctx.freeRects[write++] = ctx.freeRects[read];
+        if (!ctx.maxRects.dead[read]) ctx.maxRects.freeRects[write++] = ctx.maxRects.freeRects[read];
     }
-    ctx.freeRects.resize(write);
+    ctx.maxRects.freeRects.resize(write);
 }
 
 // aboveReserveY >= 0: only rects where item fits above that Y. < 0: all rects.
@@ -189,14 +189,14 @@ void Packer::MaxRectsPack(PackContext& ctx, int gridW, int gridH, const std::vec
                           const volatile long* abortFlag, int reserveX, int reserveW, int heuristic)
 {
     ctx.placements.clear();
-    ctx.freeRects.clear();
+    ctx.maxRects.freeRects.clear();
 
     Rect initial;
     initial.x = 0;
     initial.y = 0;
     initial.w = gridW;
     initial.h = gridH;
-    ctx.freeRects.push_back(initial);
+    ctx.maxRects.freeRects.push_back(initial);
 
     int reserveY = gridH - target;
 
@@ -234,15 +234,15 @@ void Packer::MaxRectsPack(PackContext& ctx, int gridW, int gridH, const std::vec
 
             // Pass 1: above reserve only (soft constraint)
             if (reserveW <= 0)
-                FindBestBAF(ctx.freeRects, item, numOri, reserveY, bestArea, bestShortSide, bestIndex, bestW, bestH,
-                            bestRotated);
+                FindBestBAF(ctx.maxRects.freeRects, item, numOri, reserveY, bestArea, bestShortSide, bestIndex, bestW,
+                            bestH, bestRotated);
 
             // Pass 2: anywhere
             if (bestIndex < 0)
             {
                 bestArea      = LLONG_MAX;
                 bestShortSide = INT_MAX;
-                FindBestBAF(ctx.freeRects, item, numOri, -1, bestArea, bestShortSide, bestIndex, bestW, bestH,
+                FindBestBAF(ctx.maxRects.freeRects, item, numOri, -1, bestArea, bestShortSide, bestIndex, bestW, bestH,
                             bestRotated);
             }
         }
@@ -256,16 +256,16 @@ void Packer::MaxRectsPack(PackContext& ctx, int gridW, int gridH, const std::vec
             // Skipped when reserveW > 0 — free rects already exclude reservation,
             // so the reserveY check would wrongly block the side strips.
             if (reserveW <= 0)
-                FindBestBSSF(ctx.freeRects, item, numOri, reserveY, bestShortSide, bestLongSide, bestIndex, bestW,
-                             bestH, bestRotated);
+                FindBestBSSF(ctx.maxRects.freeRects, item, numOri, reserveY, bestShortSide, bestLongSide, bestIndex,
+                             bestW, bestH, bestRotated);
 
             // Pass 2: anywhere
             if (bestIndex < 0)
             {
                 bestShortSide = INT_MAX;
                 bestLongSide  = INT_MAX;
-                FindBestBSSF(ctx.freeRects, item, numOri, -1, bestShortSide, bestLongSide, bestIndex, bestW, bestH,
-                             bestRotated);
+                FindBestBSSF(ctx.maxRects.freeRects, item, numOri, -1, bestShortSide, bestLongSide, bestIndex, bestW,
+                             bestH, bestRotated);
             }
         }
 
@@ -274,8 +274,8 @@ void Packer::MaxRectsPack(PackContext& ctx, int gridW, int gridH, const std::vec
         Placement p;
         p.id      = item.id;
         p.exactId = item.exactId;
-        p.x       = ctx.freeRects[bestIndex].x;
-        p.y       = ctx.freeRects[bestIndex].y;
+        p.x       = ctx.maxRects.freeRects[bestIndex].x;
+        p.y       = ctx.maxRects.freeRects[bestIndex].y;
         p.w       = bestW;
         p.h       = bestH;
         p.rotated = bestRotated;

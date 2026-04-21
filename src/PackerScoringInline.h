@@ -71,8 +71,8 @@ static inline int FunctionSimilarityPct(int funcA, int funcB, const Packer::Pack
     int lo = funcA < funcB ? funcA : funcB;
     int hi = funcA < funcB ? funcB : funcA;
 
-    if (lo == 3 && hi == 15) return ctx.funcSimFoodFoodRestricted;  // ITEM_FOOD ↔ ITEM_FOOD_RESTRICTED
-    if (lo == 1 && hi == 12) return ctx.funcSimFirstaidRobotrepair; // ITEM_FIRSTAID ↔ ITEM_ROBOTREPAIR
+    if (lo == 3 && hi == 15) return ctx.grouping.funcSimFoodFoodRestricted;  // ITEM_FOOD ↔ ITEM_FOOD_RESTRICTED
+    if (lo == 1 && hi == 12) return ctx.grouping.funcSimFirstaidRobotrepair; // ITEM_FIRSTAID ↔ ITEM_ROBOTREPAIR
 
     return 0;
 }
@@ -86,24 +86,25 @@ static inline int PairWeight(const Packer::Item& a, const Packer::Item& b, const
 
     if (a.exactId == b.exactId && a.exactId >= 0)
     {
-        if (ctx.tierWeightExact >= 100) return ctx.tierWeightExact;
-        best = std::max(best, ctx.tierWeightExact);
+        if (ctx.grouping.tierWeightExact >= 100) return ctx.grouping.tierWeightExact;
+        best = std::max(best, ctx.grouping.tierWeightExact);
     }
 
-    if (a.customGroupId >= 0 && a.customGroupId == b.customGroupId) best = std::max(best, ctx.tierWeightCustom);
+    if (a.customGroupId >= 0 && a.customGroupId == b.customGroupId)
+        best = std::max(best, ctx.grouping.tierWeightCustom);
 
-    if (a.gameDataType >= 0 && a.gameDataType == b.gameDataType) best = std::max(best, ctx.tierWeightType);
+    if (a.gameDataType >= 0 && a.gameDataType == b.gameDataType) best = std::max(best, ctx.grouping.tierWeightType);
 
     int simPct = FunctionSimilarityPct(a.itemFunction, b.itemFunction, ctx);
     if (simPct > 0)
     {
-        int fnWeight = (ctx.tierWeightFunction * simPct + 50) / 100;
+        int fnWeight = (ctx.grouping.tierWeightFunction * simPct + 50) / 100;
         best         = std::max(best, fnWeight);
     }
 
     // Any shared flag bit triggers the tier — currently bit 0 (food_crop)
     // and bit 1 (trade_item).
-    if ((a.flagsMask & b.flagsMask) != 0) best = std::max(best, ctx.tierWeightFlags);
+    if ((a.flagsMask & b.flagsMask) != 0) best = std::max(best, ctx.grouping.tierWeightFlags);
 
     return best;
 }

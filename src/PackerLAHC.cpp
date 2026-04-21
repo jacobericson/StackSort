@@ -223,22 +223,22 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     // Reset Path Relinking elite pool every call — reuseCtx would otherwise
     // carry a prior pack's elites forward. Cheap because the vector usually
     // holds at most eliteCap entries (default 8).
-    ctx.pathRelinkElites.clear();
-    ctx.pathRelinkEliteScores.clear();
-    ctx.skylineWasteCoef           = effSkylineWasteCoef;
-    ctx.tierWeightExact            = effTierWeightExact;
-    ctx.tierWeightCustom           = effTierWeightCustom;
-    ctx.tierWeightType             = effTierWeightType;
-    ctx.tierWeightFunction         = effTierWeightFunction;
-    ctx.tierWeightFlags            = effTierWeightFlags;
-    ctx.funcSimFoodFoodRestricted  = effFuncSimFoodFoodRestricted;
-    ctx.funcSimFirstaidRobotrepair = effFuncSimFirstaidRobotrepair;
-    ctx.softGroupingPct            = effSoftGroupingPct;
+    ctx.pathRelink.elites.clear();
+    ctx.pathRelink.eliteScores.clear();
+    ctx.skylineWasteCoef                    = effSkylineWasteCoef;
+    ctx.grouping.tierWeightExact            = effTierWeightExact;
+    ctx.grouping.tierWeightCustom           = effTierWeightCustom;
+    ctx.grouping.tierWeightType             = effTierWeightType;
+    ctx.grouping.tierWeightFunction         = effTierWeightFunction;
+    ctx.grouping.tierWeightFlags            = effTierWeightFlags;
+    ctx.grouping.funcSimFoodFoodRestricted  = effFuncSimFoodFoodRestricted;
+    ctx.grouping.funcSimFirstaidRobotrepair = effFuncSimFirstaidRobotrepair;
+    ctx.grouping.softGroupingPct            = effSoftGroupingPct;
     // Prebuild the PairWeight lookup table once per pack. Soft-track loops
     // inside ComputeGroupingBonus* will O(1) lookup instead of recomputing
     // per LAHC iter. Skipped when the soft track is off.
     if (effSoftGroupingPct > 0) BuildPairWeightMatrix(ctx, items);
-    else ctx.pairWeightMatrixN = 0;
+    else ctx.grouping.pairWeightMatrixN = 0;
 
     // Pre-reservation scan (H > 1 only)
     // Reserve a W x target rectangle at the grid bottom and pack into the
@@ -404,7 +404,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
 
 #ifdef STACKSORT_PROFILE
         // 0 → skip prefix measurement for the restart-seed SkylinePack.
-        ctx.profSkylinePrefixK = 0;
+        ctx.prof.skylinePrefixK = 0;
 #endif
 
         // Pack the restart seed
@@ -452,8 +452,8 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
 
         // Reset the grid cache per-restart. Cross-restart sharing is
         // rare because each restart perturbs from a different ordering.
-        ctx.gridCacheCount = 0;
-        ctx.gridCacheHead  = 0;
+        ctx.cache.count    = 0;
+        ctx.cache.ringHead = 0;
 
         for (int iter = 0; iter < effIters; ++iter)
         {
@@ -542,8 +542,8 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
 
             int startIdx = 0;
             ++diagSkylineSnapProbes;
-            if (ctx.skylineSnapValid && ctx.skylineSnapN == (int)curOrder.size() && keptPrefix > 0 &&
-                keptPrefix < ctx.skylineSnapN)
+            if (ctx.skyline.snapValid && ctx.skyline.snapN == (int)curOrder.size() && keptPrefix > 0 &&
+                keptPrefix < ctx.skyline.snapN)
             {
                 RestoreSkylineState(ctx, gridW, gridH, keptPrefix);
                 startIdx = keptPrefix;
@@ -552,7 +552,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
 #ifdef STACKSORT_PROFILE
             // Skip prefix measurement on restore — the timer in SkylinePack
             // would fire immediately and record ~0 cycles otherwise.
-            ctx.profSkylinePrefixK = (startIdx > 0) ? 0 : keptPrefix;
+            ctx.prof.skylinePrefixK = (startIdx > 0) ? 0 : keptPrefix;
 #endif
 
             PROF_TICK(profMoveGen);
@@ -624,7 +624,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                 UndoMove(curOrder, move);
                 // Undo leaves curOrder diverging from snap at the move's
                 // positions; keptPrefix vs snap is no longer safe next iter.
-                ctx.skylineSnapValid = false;
+                ctx.skyline.snapValid = false;
             }
 
             history[hi] = curScore;
@@ -671,9 +671,9 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     // Off unless enablePathRelinking; also skipped when the pool has < 2
     // distinct elites (captures the FastConverge-collapsed case).
     PROF_PHASE_BEGIN(pathRelink);
-    if (enablePathRelinking && ctx.pathRelinkElites.size() >= 2 && !(abortFlag && *abortFlag != 0))
+    if (enablePathRelinking && ctx.pathRelink.elites.size() >= 2 && !(abortFlag && *abortFlag != 0))
     {
-        int poolSize   = (int)ctx.pathRelinkElites.size();
+        int poolSize   = (int)ctx.pathRelink.elites.size();
         int maxPathLen = (effPathRelinkMaxPathLen > 0) ? effPathRelinkMaxPathLen : (int)items.size();
         // Scratch ordering mutated in place by PathRelinkWalk. Reserved once to
         // avoid reallocation per pair.
@@ -685,9 +685,9 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
             {
                 if (i == j) continue;
                 if (abortFlag && *abortFlag != 0) break;
-                prWorking            = ctx.pathRelinkElites[i];
-                long long endpointSc = ctx.pathRelinkEliteScores[i];
-                PathRelinkWalk(ctx, gridW, gridH, prWorking, ctx.pathRelinkElites[j], items, target, abortFlag,
+                prWorking            = ctx.pathRelink.elites[i];
+                long long endpointSc = ctx.pathRelink.eliteScores[i];
+                PathRelinkWalk(ctx, gridW, gridH, prWorking, ctx.pathRelink.elites[j], items, target, abortFlag,
                                bestReserveX, bestReserveW, effGroupingWeight, effFragWeight, effGroupingPower,
                                bestScore, bestLerA, bestLerW, bestLerH, bestLerX, bestLerY, bestConc, bestStranded,
                                repairGridDirty, outBestOrder, endpointSc, maxPathLen, diagPathRelinkIntermediatesScored,
@@ -830,13 +830,13 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         outDiag->keptPrefixCount                 = diagKeptPrefixCount;
         outDiag->gridHashProbes                  = diagGridHashProbes;
         outDiag->gridHashHits                    = diagGridHashHits;
-        outDiag->profCyclesSkylinePrefix         = ctx.profSkylinePrefixCycles;
-        outDiag->profCyclesSkylineWasteMap       = ctx.profCyclesSkylineWasteMap;
-        outDiag->profCyclesSkylineCandidate      = ctx.profCyclesSkylineCandidate;
-        outDiag->profCyclesSkylineAdjacency      = ctx.profCyclesSkylineAdjacency;
-        outDiag->profCyclesSkylineCommit         = ctx.profCyclesSkylineCommit;
-        outDiag->profCyclesLerHistogram          = ctx.profCyclesLerHistogram;
-        outDiag->profCyclesLerStack              = ctx.profCyclesLerStack;
+        outDiag->profCyclesSkylinePrefix         = ctx.prof.skylinePrefixCycles;
+        outDiag->profCyclesSkylineWasteMap       = ctx.prof.cyclesSkylineWasteMap;
+        outDiag->profCyclesSkylineCandidate      = ctx.prof.cyclesSkylineCandidate;
+        outDiag->profCyclesSkylineAdjacency      = ctx.prof.cyclesSkylineAdjacency;
+        outDiag->profCyclesSkylineCommit         = ctx.prof.cyclesSkylineCommit;
+        outDiag->profCyclesLerHistogram          = ctx.prof.cyclesLerHistogram;
+        outDiag->profCyclesLerStack              = ctx.prof.cyclesLerStack;
 #endif
     }
     return result;

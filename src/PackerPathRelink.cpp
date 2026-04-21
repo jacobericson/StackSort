@@ -40,32 +40,32 @@ void CapturePathRelinkElite(Packer::PackContext& ctx, const std::vector<Packer::
         }
     }
 
-    for (size_t i = 0; i < ctx.pathRelinkElites.size(); ++i)
+    for (size_t i = 0; i < ctx.pathRelink.elites.size(); ++i)
     {
-        if (PathRelinkExactIdHamming(normalized, ctx.pathRelinkElites[i]) < diversityThreshold) return;
+        if (PathRelinkExactIdHamming(normalized, ctx.pathRelink.elites[i]) < diversityThreshold) return;
     }
 
-    if ((int)ctx.pathRelinkElites.size() < eliteCap)
+    if ((int)ctx.pathRelink.elites.size() < eliteCap)
     {
-        ctx.pathRelinkElites.push_back(normalized);
-        ctx.pathRelinkEliteScores.push_back(score);
+        ctx.pathRelink.elites.push_back(normalized);
+        ctx.pathRelink.eliteScores.push_back(score);
         return;
     }
 
     size_t weakest      = 0;
-    long long weakestSc = ctx.pathRelinkEliteScores[0];
-    for (size_t i = 1; i < ctx.pathRelinkEliteScores.size(); ++i)
+    long long weakestSc = ctx.pathRelink.eliteScores[0];
+    for (size_t i = 1; i < ctx.pathRelink.eliteScores.size(); ++i)
     {
-        if (ctx.pathRelinkEliteScores[i] < weakestSc)
+        if (ctx.pathRelink.eliteScores[i] < weakestSc)
         {
             weakest   = i;
-            weakestSc = ctx.pathRelinkEliteScores[i];
+            weakestSc = ctx.pathRelink.eliteScores[i];
         }
     }
     if (score > weakestSc)
     {
-        ctx.pathRelinkElites[weakest]      = normalized;
-        ctx.pathRelinkEliteScores[weakest] = score;
+        ctx.pathRelink.elites[weakest]      = normalized;
+        ctx.pathRelink.eliteScores[weakest] = score;
     }
 }
 
@@ -87,10 +87,10 @@ bool Packer::PathRelinkWalk(PackContext& ctx, int gridW, int gridH, std::vector<
     int n = (int)s.size();
     if (n != (int)goalOrder.size()) return false;
 
-    ctx.skylineSnapValid = false;
+    ctx.skyline.snapValid = false;
     SkylinePack(ctx, gridW, gridH, s, target, abortFlag, bestReserveX, bestReserveW);
     if (abortFlag && *abortFlag != 0) return false;
-    if (!ctx.skylineSnapValid || ctx.skylineSnapN != n)
+    if (!ctx.skyline.snapValid || ctx.skyline.snapN != n)
     {
         ++diagAbortedPaths;
         return false;
@@ -128,7 +128,7 @@ bool Packer::PathRelinkWalk(PackContext& ctx, int gridW, int gridH, std::vector<
         ++steps;
 
         bool canRestore =
-            ctx.skylineSnapValid && ctx.skylineSnapN == n && keptPrefix > 0 && keptPrefix < ctx.skylineSnapN;
+            ctx.skyline.snapValid && ctx.skyline.snapN == n && keptPrefix > 0 && keptPrefix < ctx.skyline.snapN;
         int startIdx = canRestore ? keptPrefix : 0;
         if (canRestore) RestoreSkylineState(ctx, gridW, gridH, keptPrefix);
         SkylinePack(ctx, gridW, gridH, s, target, abortFlag, bestReserveX, bestReserveW, startIdx);

@@ -148,7 +148,7 @@ static inline void ShuffleGroups(std::vector<Packer::Item>& items, LCG& rng)
 // pidx=0 and corrupt CollectAdjacentPids.
 static inline void RestoreSkylineState(Packer::PackContext& ctx, int gridW, int /*gridH*/, int keptPrefix)
 {
-    const Packer::SkylineBoundary& b = ctx.skylineSnapBoundaries[(size_t)keptPrefix];
+    const Packer::SkylineBoundary& b = ctx.skyline.snapBoundaries[(size_t)keptPrefix];
 
     // Roll back ctx.grid + placementIdGrid for every placement being
     // discarded. Walking placements directly is equivalent to the old
@@ -168,33 +168,33 @@ static inline void RestoreSkylineState(Packer::PackContext& ctx, int gridW, int 
 
     ctx.placements.resize((size_t)b.placementsCount);
 
-    ctx.wasteRects.reserve((size_t)b.wasteCount);
-    ctx.wasteRects.assign(ctx.skylineSnapWaste.begin() + b.wasteStart,
-                          ctx.skylineSnapWaste.begin() + b.wasteStart + b.wasteCount);
+    ctx.skyline.wasteRects.reserve((size_t)b.wasteCount);
+    ctx.skyline.wasteRects.assign(ctx.skyline.snapWaste.begin() + b.wasteStart,
+                                  ctx.skyline.snapWaste.begin() + b.wasteStart + b.wasteCount);
 
     // Rebuild the skyline linked-list arena from the saved linear slice.
-    ctx.skylineHead     = -1;
-    ctx.skylineFreeHead = -1;
-    ctx.skylineCount    = 0;
-    short tail          = -1;
+    ctx.skyline.head     = -1;
+    ctx.skyline.freeHead = -1;
+    ctx.skyline.count    = 0;
+    short tail           = -1;
     for (int i = 0; i < b.skylineCount; ++i)
     {
-        short idx             = ctx.skylineCount++;
-        ctx.skylineNodes[idx] = ctx.skylineSnapSkyline[(size_t)b.skylineStart + (size_t)i];
-        ctx.skylineNext[idx]  = -1;
-        if (tail < 0) ctx.skylineHead = idx;
-        else ctx.skylineNext[tail] = idx;
+        short idx              = ctx.skyline.count++;
+        ctx.skyline.nodes[idx] = ctx.skyline.snapSkyline[(size_t)b.skylineStart + (size_t)i];
+        ctx.skyline.next[idx]  = -1;
+        if (tail < 0) ctx.skyline.head = idx;
+        else ctx.skyline.next[tail] = idx;
         tail = idx;
     }
 
-    ctx.curHashA = b.hashA;
-    ctx.curHashB = b.hashB;
+    ctx.cache.curHashA = b.hashA;
+    ctx.cache.curHashB = b.hashB;
 
     // SkylinePack's emit-on-placement push_backs must land at boundary k+1;
     // stale entries past boundary[keptPrefix] would otherwise offset them.
-    ctx.skylineSnapBoundaries.resize((size_t)keptPrefix + 1);
-    ctx.skylineSnapWaste.resize((size_t)b.wasteStart + (size_t)b.wasteCount);
-    ctx.skylineSnapSkyline.resize((size_t)b.skylineStart + (size_t)b.skylineCount);
+    ctx.skyline.snapBoundaries.resize((size_t)keptPrefix + 1);
+    ctx.skyline.snapWaste.resize((size_t)b.wasteStart + (size_t)b.wasteCount);
+    ctx.skyline.snapSkyline.resize((size_t)b.skylineStart + (size_t)b.skylineCount);
 }
 
 // Shared best-scalar update for the two LAHC sites and the Path Relinking

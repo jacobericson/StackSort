@@ -4,16 +4,16 @@ bool Packer::GridCacheLookup(PackContext& ctx, int gridW, int gridH, int& outLer
                              int& outLerHeight, int& outLerX, int& outLerY, double& outConcentration,
                              int& outStrandedCells)
 {
-    unsigned long long hA       = ctx.curHashA;
-    unsigned long long hB       = ctx.curHashB;
+    unsigned long long hA       = ctx.cache.curHashA;
+    unsigned long long hB       = ctx.cache.curHashB;
     const unsigned char* curPtr = &ctx.grid[0];
 
     // Bit-exactness rests on the 128-bit twin-Zobrist key. Birthday-bound
     // collision probability at 10^4-10^5 distinct grids per run is ~10^-31,
     // orders of magnitude below any other noise source — no memcmp guard.
-    for (int i = 0; i < ctx.gridCacheCount; ++i)
+    for (int i = 0; i < ctx.cache.count; ++i)
     {
-        const GridCacheEntry& e = ctx.gridCache[i];
+        const GridCacheEntry& e = ctx.cache.entries[i];
         if (e.hashA != hA || e.hashB != hB) continue;
         outLerArea       = e.lerArea;
         outLerWidth      = e.lerWidth;
@@ -30,8 +30,8 @@ bool Packer::GridCacheLookup(PackContext& ctx, int gridW, int gridH, int& outLer
     outConcentration = ComputeConcentrationAndStrandedCtx(ctx, gridW, gridH, outLerX, outLerY, outLerWidth,
                                                           outLerHeight, outStrandedCells);
 
-    int slot            = ctx.gridCacheHead;
-    GridCacheEntry& dst = ctx.gridCache[slot];
+    int slot            = ctx.cache.ringHead;
+    GridCacheEntry& dst = ctx.cache.entries[slot];
     dst.hashA           = hA;
     dst.hashB           = hB;
     dst.lerArea         = outLerArea;
@@ -41,8 +41,8 @@ bool Packer::GridCacheLookup(PackContext& ctx, int gridW, int gridH, int& outLer
     dst.lerY            = outLerY;
     dst.concentration   = outConcentration;
     dst.strandedCells   = outStrandedCells;
-    ctx.gridCacheHead   = (ctx.gridCacheHead + 1) & 63;
-    if (ctx.gridCacheCount < 64) ++ctx.gridCacheCount;
+    ctx.cache.ringHead  = (ctx.cache.ringHead + 1) & 63;
+    if (ctx.cache.count < 64) ++ctx.cache.count;
 
     return false;
 }
