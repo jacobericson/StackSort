@@ -210,6 +210,7 @@ static std::vector<std::string> BuildHeader()
     h.push_back("enable_pre_reservation");
     h.push_back("enable_strip_shift");
     h.push_back("enable_tile_swap");
+    h.push_back("enable_path_relinking");
     h.push_back("all_placed");
     h.push_back("num_placed");
     h.push_back("score");
@@ -265,6 +266,18 @@ static std::vector<std::string> BuildHeader()
     h.push_back("first_pass_strip_shift_strips_improved");
     h.push_back("first_pass_tile_swap_candidates_found");
     h.push_back("first_pass_tile_swap_candidates_committed");
+    h.push_back("path_relink_pairs_run");
+    h.push_back("path_relink_intermediates_scored");
+    h.push_back("path_relink_global_best_updates");
+    h.push_back("path_relink_aborted_paths");
+    h.push_back("path_relink_avg_path_len_sum");
+    h.push_back("path_relink_global_best_gain_max");
+    h.push_back("first_pass_path_relink_pairs_run");
+    h.push_back("first_pass_path_relink_intermediates_scored");
+    h.push_back("first_pass_path_relink_global_best_updates");
+    h.push_back("first_pass_path_relink_aborted_paths");
+    h.push_back("first_pass_path_relink_avg_path_len_sum");
+    h.push_back("first_pass_path_relink_global_best_gain_max");
     h.push_back("scoring_grouping_power_quarters");
     h.push_back("skyline_waste_coef");
     h.push_back("tier_weight_exact");
@@ -294,6 +307,7 @@ static std::vector<std::string> BuildHeader()
     h.push_back("fp_cycles_optimize_grouping");      // per-run: post-LAHC same-footprint swap
     h.push_back("fp_cycles_strip_shift");            // per-run: post-LAHC strip permutation
     h.push_back("fp_cycles_tile_swap");              // per-run: post-LAHC multi-placement swap
+    h.push_back("fp_cycles_path_relink");            // per-run: post-LAHC path relinking over elite pool
     h.push_back("fp_cycles_borders_raw");            // per-run: final cross-power clustering metric
     h.push_back("fp_kept_prefix_sum");
     h.push_back("fp_kept_prefix_count");
@@ -380,6 +394,8 @@ static int run(int argc, char** argv)
     QueryPerformanceFrequency(&freq);
 
     std::string tsStr = IntToStr((long long)time(NULL));
+
+    std::string progressFile = args.outFile + ".progress";
 
     int totalRuns = 0;
     for (size_t ii = 0; ii < instancePaths.size(); ++ii)
@@ -523,6 +539,7 @@ static int run(int argc, char** argv)
                 row.push_back(IntToStr(runParams.enablePreReservation));
                 row.push_back(IntToStr(runParams.enableStripShift));
                 row.push_back(IntToStr(runParams.enableTileSwap));
+                row.push_back(IntToStr(runParams.enablePathRelinking));
                 row.push_back(BoolToStr(finalResult.allPlaced));
                 row.push_back(IntToStr((int)finalResult.placements.size()));
                 row.push_back(IntToStr(finalResult.score));
@@ -582,6 +599,18 @@ static int run(int argc, char** argv)
                 row.push_back(IntToStr(firstDiag.stripShiftStripsImproved));
                 row.push_back(IntToStr(firstDiag.tileSwapCandidatesFound));
                 row.push_back(IntToStr(firstDiag.tileSwapCandidatesCommitted));
+                row.push_back(IntToStr(finalDiag.pathRelinkPairsRun));
+                row.push_back(IntToStr(finalDiag.pathRelinkIntermediatesScored));
+                row.push_back(IntToStr(finalDiag.pathRelinkGlobalBestUpdates));
+                row.push_back(IntToStr(finalDiag.pathRelinkAbortedPaths));
+                row.push_back(IntToStr(finalDiag.pathRelinkAvgPathLenSum));
+                row.push_back(IntToStr(finalDiag.pathRelinkGlobalBestGainMax));
+                row.push_back(IntToStr(firstDiag.pathRelinkPairsRun));
+                row.push_back(IntToStr(firstDiag.pathRelinkIntermediatesScored));
+                row.push_back(IntToStr(firstDiag.pathRelinkGlobalBestUpdates));
+                row.push_back(IntToStr(firstDiag.pathRelinkAbortedPaths));
+                row.push_back(IntToStr(firstDiag.pathRelinkAvgPathLenSum));
+                row.push_back(IntToStr(firstDiag.pathRelinkGlobalBestGainMax));
                 int resolvedGPQ = (runParams.groupingPowerQuarters >= 1 && runParams.groupingPowerQuarters <= 8)
                                       ? runParams.groupingPowerQuarters
                                       : Packer::DEFAULT_GROUPING_POWER_QUARTERS;
@@ -643,6 +672,7 @@ static int run(int argc, char** argv)
                 row.push_back(IntToStr(firstDiag.profCyclesOptimizeGrouping));
                 row.push_back(IntToStr(firstDiag.profCyclesStripShift));
                 row.push_back(IntToStr(firstDiag.profCyclesTileSwap));
+                row.push_back(IntToStr(firstDiag.profCyclesPathRelink));
                 row.push_back(IntToStr(firstDiag.profCyclesBordersRaw));
                 row.push_back(IntToStr(firstDiag.keptPrefixSum));
                 row.push_back(IntToStr(firstDiag.keptPrefixCount));
@@ -664,6 +694,15 @@ static int run(int argc, char** argv)
 
         (void)fprintf(stdout, "[%s] %dx%d, %d items, density %.2f, targets %d..%d\n", inst.name.c_str(), inst.gridW,
                       inst.gridH, (int)inst.items.size(), density, startT, endT);
+
+        {
+            FILE* pf = fopen(progressFile.c_str(), "w");
+            if (pf)
+            {
+                (void)fprintf(pf, "%d/%d %s\n", (int)(ii + 1), (int)instancePaths.size(), inst.name.c_str());
+                (void)fclose(pf);
+            }
+        }
     }
 
     if (!csv.Close())

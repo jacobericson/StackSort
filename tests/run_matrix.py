@@ -1,11 +1,75 @@
 #!/usr/bin/env python3
 import argparse
 import concurrent.futures as cf
+import ctypes
 import glob
 import os
 import subprocess
 import sys
+import threading
 import time
+
+
+def _pin_to_core0():
+    """Pin this process to core 0 so the orchestration/poller stays off
+    benchmark cores (shards pin themselves via STACKSORT_PROFILE_AFFINITY)."""
+    try:
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetCurrentProcess()
+        kernel32.SetProcessAffinityMask(handle, 1)
+    except Exception:
+        pass
+
+
+def _read_progress(path):
+    """Return (done, total) from a harness .progress sidecar, or None."""
+    try:
+        with open(path, "r") as f:
+            line = f.readline().strip()
+        if not line:
+            return None
+        frac = line.split()[0]
+        done, total = frac.split("/")
+        return int(done), int(total)
+    except Exception:
+        return None
+
+
+def _progress_poller(tag_dir, stop_event, jobs_done, total_jobs, interval=2.0):
+    """Background thread: poll .progress files and redraw a status line."""
+    while not stop_event.is_set():
+        entries = []
+        for p in sorted(glob.glob(os.path.join(tag_dir, "*.progress"))):
+            info = _read_progress(p)
+            name = os.path.basename(p).replace(".csv.progress", "")
+            if info:
+                entries.append((name, info[0], info[1]))
+            else:
+                entries.append((name, 0, 0))
+
+        parts = []
+        for name, done, total in entries:
+            if total > 0:
+                parts.append("{} {}/{}".format(name, done, total))
+        shard_str = "  ".join(parts) if parts else "waiting..."
+
+        bar_total = sum(e[2] for e in entries)
+        bar_done = sum(e[1] for e in entries)
+        if bar_total > 0:
+            pct = 100.0 * bar_done / bar_total
+            w = 30
+            filled = int(pct / 100.0 * w)
+            bar = "#" * filled + "-" * (w - filled)
+            line = "\r  [{}] {}/{} instances ({:.0f}%)  jobs {}/{}  {}".format(
+                bar, bar_done, bar_total, pct, jobs_done[0], total_jobs,
+                shard_str)
+        else:
+            line = "\r  jobs {}/{}  {}".format(
+                jobs_done[0], total_jobs, shard_str)
+
+        sys.stdout.write(line + "\033[K")
+        sys.stdout.flush()
+        stop_event.wait(interval)
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -234,9 +298,19 @@ def main():
     print("Output directory: {}".format(tag_dir))
     print("")
 
+    if args.pin_shards:
+        _pin_to_core0()
+
     t0 = time.time()
     failures = []
     done = 0
+    jobs_done = [0]
+    stop_event = threading.Event()
+    poller = threading.Thread(target=_progress_poller,
+                              args=(tag_dir, stop_event, jobs_done, len(jobs)),
+                              daemon=True)
+    poller.start()
+
     with cf.ThreadPoolExecutor(max_workers=args.workers) as ex:
         futures = {
             ex.submit(run_one, args.bench, args.corpus, cfg, rot,
@@ -247,15 +321,24 @@ def main():
         for fut in cf.as_completed(futures):
             name, rot, rc, elapsed, stderr = fut.result()
             done += 1
-            status = "ok" if rc == 0 else "FAIL (rc={})".format(rc)
-            print("  [{}/{}] {:30s} rot={} {:.1f}s  {}".format(
-                done, len(jobs), name, rot, elapsed, status))
+            jobs_done[0] = done
             if rc != 0:
                 failures.append((name, rot, rc, stderr))
 
+    stop_event.set()
+    poller.join(timeout=3)
+    sys.stdout.write("\r\033[K")
+    sys.stdout.flush()
+
     total = time.time() - t0
-    print("")
-    print("Total elapsed: {:.1f}s".format(total))
+    print("Total elapsed: {:.1f}s  ({} jobs, {} failures)".format(
+        total, len(jobs), len(failures)))
+
+    for p in glob.glob(os.path.join(tag_dir, "*.progress")):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
 
     if failures:
         print("")
