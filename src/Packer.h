@@ -79,6 +79,16 @@ class Packer
     // Check that no cell is doubly-occupied and all coords are in bounds.
     static bool ValidatePlacements(int gridW, int gridH, const std::vector<Placement>& placements);
 
+    // Flood-fill ctx.visited from cells inside the LER rect through
+    // 4-connected empty space. Shared between the fused scorer and the
+    // repair-move branch in PackAnnealedH. extGrid != NULL reads occupancy
+    // from the caller's buffer instead of ctx.grid — required when the
+    // caller needs ctx.grid to stay untouched for incremental maintenance.
+    // Output still lands in ctx.visited. Public so the refactored
+    // repair-move TU (PackerRepairMove.cpp) can reach it.
+    static void FloodFillFromLer(PackContext& ctx, int gridW, int gridH, int lerX, int lerY, int lerW, int lerH,
+                                 const unsigned char* extGrid = NULL);
+
     // Scoring weight defaults. Mirror the values used by ComputeScore when
     // no SearchParams override is provided. Public so the harness can reference
     // them when resolving sentinel fields into CSV output.
@@ -625,15 +635,6 @@ class Packer
     static double ComputeConcentrationAndStrandedCtx(PackContext& ctx, int gridW, int gridH, int lerX, int lerY,
                                                      int lerW, int lerH, int& outStrandedCells);
 
-    // Flood-fill ctx.visited from cells inside the LER rect through
-    // 4-connected empty space. Shared between the fused scorer above and
-    // the repair_move branch in PackAnnealedH. extGrid != NULL reads
-    // occupancy from the caller's buffer instead of ctx.grid — required
-    // when the caller needs ctx.grid to stay untouched for incremental
-    // maintenance. Output still lands in ctx.visited.
-    static void FloodFillFromLer(PackContext& ctx, int gridW, int gridH, int lerX, int lerY, int lerW, int lerH,
-                                 const unsigned char* extGrid = NULL);
-
     // Hashes ctx.grid (caller must have built it via BuildOccupancyGrid),
     // returns cached LER + Concentration on hit or computes and inserts on
     // miss. Returns true iff hit.
@@ -737,6 +738,17 @@ class Packer
     static long long ComputeGroupingBonusAdj(const std::vector<Placement>& placements, const std::vector<Item>& items,
                                              const AdjGraph& g, int n, const PackContext& ctx,
                                              int groupingPowerQuarters);
+
+    // Shared union-find accumulator used by ComputeGroupingBonus /
+    // ComputeGroupingBonusAdj / ComputeGroupingBordersRaw. Fills caller-owned
+    // parent/compBorders + softParent/softCompBorders (256 entries each) with
+    // per-component border totals. g==NULL switches to an O(n²) pair scan
+    // (with an exact-only fast path when softGroupingPct == 0); g!=NULL walks
+    // the prebuilt graph's edges. Member function so it can call SharedBorder
+    // and reference the AdjGraph nested type.
+    static void AccumulateGroupingComponents(const std::vector<Placement>& placements, const std::vector<Item>& items,
+                                             const PackContext& ctx, int n, const AdjGraph* g, int parent[],
+                                             int compBorders[], int softParent[], int softCompBorders[]);
 
     static const int TARGET_BONUS = 10000;
 };

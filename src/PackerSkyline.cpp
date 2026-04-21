@@ -1,27 +1,9 @@
 #include "Packer.h"
+#include "PackerProfile.h"
+#include "PackerScoringInline.h"
 
 #include <climits>
 #include <cstring>
-
-#ifdef STACKSORT_PROFILE
-#include <intrin.h>
-#pragma intrinsic(__rdtsc)
-#endif
-
-// Sub-phase counters. Gated on STACKSORT_PROFILE_SUBPHASE (not PROFILE) so
-// the per-candidate rdtsc pairs don't inflate the coarse SkylinePack/LER
-// totals used for apples-to-apples optimization comparisons.
-#ifdef STACKSORT_PROFILE_SUBPHASE
-#define SUBPHASE_BEGIN(tag) unsigned long long _sp_##tag = __rdtsc()
-#define SUBPHASE_END(tag, acc)                                                                                         \
-    do                                                                                                                 \
-    {                                                                                                                  \
-        acc += (long long)(__rdtsc() - _sp_##tag);                                                                     \
-    } while (0)
-#else
-#define SUBPHASE_BEGIN(tag) ((void)0)
-#define SUBPHASE_END(tag, acc) ((void)0)
-#endif
 
 // Maximum adjacent same-type placements to track per candidate position.
 // Bounded by the number of items that can physically touch a single item.
