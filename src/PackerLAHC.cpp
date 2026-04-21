@@ -61,6 +61,22 @@ struct LCG
     }
 };
 
+// max-of-K uniform draws: CDF = (x/n)^K biases toward tail.
+// K = alphaQ/4 so alphaQ=8 → K=2 (linear bias), alphaQ=12 → K=3 (quadratic).
+static int SampleBiasedIndex(LCG& rng, int n, int alphaQ, int uniformPct)
+{
+    if (alphaQ <= 0 || uniformPct >= 100) return rng.nextInt(n);
+    if (rng.nextInt(100) < uniformPct) return rng.nextInt(n);
+    int k    = std::max(alphaQ / 4, 1);
+    int best = 0;
+    for (int i = 0; i < k; ++i)
+    {
+        int v = rng.nextInt(n);
+        best  = std::max(v, best);
+    }
+    return best;
+}
+
 static const int NUM_RESTARTS      = 16;
 static const int ITERS_PER_RESTART = 4000; // 16 * 4000 = 64000 total (plateau-limited in practice)
 static const int LAHC_HISTORY_LEN  = 200;
@@ -538,6 +554,12 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                                         : Packer::DEFAULT_PATH_RELINK_DIVERSITY_PCT;
     int effPathRelinkMaxPathLen   = (params && params->pathRelinkMaxPathLen > 0) ? params->pathRelinkMaxPathLen : 0;
 
+    // Late-biased move generation. alphaQ=0 or uniformPct=100 disables.
+    int effLateBiasAlphaQ =
+        (params && params->lateBiasAlphaQ >= 0) ? params->lateBiasAlphaQ : Packer::DEFAULT_LATE_BIAS_ALPHA_Q;
+    int effLateBiasUniformPct = (params && params->lateBiasUniformPct >= 0) ? params->lateBiasUniformPct
+                                                                            : Packer::DEFAULT_LATE_BIAS_UNIFORM_PCT;
+
     // Diagnostic counters — populated into *outDiag at the bottom of the function.
     int diagPackCalls                         = 0;
     int diagPlateauBreaks                     = 0;
@@ -864,7 +886,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
             {
                 // Swap move
                 move.type = MOVE_SWAP;
-                move.a    = rng.nextInt(n);
+                move.a    = SampleBiasedIndex(rng, n, effLateBiasAlphaQ, effLateBiasUniformPct);
                 move.b    = rng.nextInt(n - 1);
                 if (move.b >= move.a) ++move.b;
                 std::swap(curOrder[move.a], curOrder[move.b]);
@@ -873,7 +895,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
             {
                 // Insert move: remove at a, insert at b
                 move.type = MOVE_INSERT;
-                move.a    = rng.nextInt(n);
+                move.a    = SampleBiasedIndex(rng, n, effLateBiasAlphaQ, effLateBiasUniformPct);
                 move.b    = rng.nextInt(n - 1);
                 if (move.b >= move.a) ++move.b;
                 Item tmp = curOrder[move.a];
@@ -886,7 +908,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                 // and locking canRotate=false. Square or non-rotatable
                 // victims reroll to swap so we don't waste an LAHC iter
                 // on an unchanged ordering.
-                move.a                = rng.nextInt(n);
+                move.a                = SampleBiasedIndex(rng, n, effLateBiasAlphaQ, effLateBiasUniformPct);
                 const Item& candidate = curOrder[move.a];
                 if (candidate.canRotate && candidate.w != candidate.h)
                 {
@@ -1061,7 +1083,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                 {
                     // Fall back to random swap
                     move.type = MOVE_SWAP;
-                    move.a    = rng.nextInt(n);
+                    move.a    = SampleBiasedIndex(rng, n, effLateBiasAlphaQ, effLateBiasUniformPct);
                     move.b    = rng.nextInt(n - 1);
                     if (move.b >= move.a) ++move.b;
                     std::swap(curOrder[move.a], curOrder[move.b]);

@@ -39,6 +39,8 @@ def main():
                     help="Baseline CSV path")
     ap.add_argument("--after", required=True,
                     help="Glob for new-run CSV(s)")
+    ap.add_argument("--cross-config", action="store_true",
+                    help="Drop config_name from join keys (for ablation comparisons)")
     args = ap.parse_args()
 
     if not os.path.exists(args.before):
@@ -63,8 +65,10 @@ def main():
     if refine_col:
         keys.append(refine_col)
 
-    # Scope before to only baseline config so cross-config CSVs don't fight.
-    before = before[before["config_name"] == "baseline"].copy()
+    if args.cross_config:
+        keys = [k for k in keys if k != "config_name"]
+    else:
+        before = before[before["config_name"] == "baseline"].copy()
 
     print("BEFORE rows: {}   AFTER rows: {}".format(len(before), len(after)))
     print("Join keys: {}".format(keys))

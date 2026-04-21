@@ -159,6 +159,14 @@ bool ParseConfigFile(const std::string& filePath, const Packer::SearchParams& ba
                 if (!ParseInt(val, rotatePct, errMsg, filePath, lineNum, key)) return false;
             }
             // repair_pct is implicit: 100 - (swap + insert + rotate)
+            else if (key == "late_bias_alpha_q")
+            {
+                if (!ParseInt(val, out.params.lateBiasAlphaQ, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "late_bias_uniform_pct")
+            {
+                if (!ParseInt(val, out.params.lateBiasUniformPct, errMsg, filePath, lineNum, key)) return false;
+            }
         }
         else if (section == "features")
         {

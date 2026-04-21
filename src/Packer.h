@@ -126,6 +126,9 @@ class Packer
     static const int DEFAULT_PATH_RELINK_DIVERSITY_PCT = 0; // 0 = no diversity filter (admit until cap)
     static const int DEFAULT_PATH_RELINK_MAX_PATH_LEN  = 0; // 0 sentinel → use N (items.size)
 
+    static const int DEFAULT_LATE_BIAS_ALPHA_Q     = 8;  // max-of-2 (α=2)
+    static const int DEFAULT_LATE_BIAS_UNIFORM_PCT = 35; // 35% uniform floor
+
     // Tunable LAHC search parameters. NULL = use compiled defaults.
     // Default constructor leaves all fields at sentinels so callers can
     // default-construct and override only the fields they care about.
@@ -200,6 +203,15 @@ class Packer
         int pathRelinkDiversityPct;
         int pathRelinkMaxPathLen;
 
+        // Late-biased move generation: sample move.a with p(i) ∝ (i/n)^(alphaQ/4)
+        // then take keptPrefix = min(a, b). Pushes disturbance toward the tail
+        // of the packing order so snapshot restore skips more prefix work.
+        // lateBiasAlphaQ: exponent in quarter-steps (12 = α=3). 0 = disabled.
+        // lateBiasUniformPct: percent of moves drawn uniformly for diversification.
+        //   100 = fully uniform = disabled. -1 = compiled default (0 = disabled).
+        int lateBiasAlphaQ;
+        int lateBiasUniformPct;
+
         SearchParams()
             : numRestarts(-1), itersPerRestart(-1), lahcHistoryLen(-1), plateauThreshold(-1), rngSeed(0),
               enableBafSeed(-1), enableUnconstrainedFallback(-1), enableOptimizeGrouping(-1), enableFastConverge(-1),
@@ -208,7 +220,7 @@ class Packer
               groupingPowerQuarters(-1), skylineWasteCoef(-1), tierWeightExact(-1), tierWeightCustom(-1),
               tierWeightType(-1), tierWeightFunction(-1), tierWeightFlags(-1), funcSimFoodFoodRestricted(-1),
               funcSimFirstaidRobotrepair(-1), softGroupingPct(-1), enablePathRelinking(-1), pathRelinkEliteCap(-1),
-              pathRelinkDiversityPct(-1), pathRelinkMaxPathLen(-1)
+              pathRelinkDiversityPct(-1), pathRelinkMaxPathLen(-1), lateBiasAlphaQ(-1), lateBiasUniformPct(-1)
         {
         }
 

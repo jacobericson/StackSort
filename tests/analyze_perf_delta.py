@@ -70,6 +70,8 @@ def main():
     ap.add_argument("--before", required=True, help="Baseline CSV path or glob")
     ap.add_argument("--after",  required=True, help="Glob for post-change CSV(s)")
     ap.add_argument("--out", default=None, help="Optional markdown output path")
+    ap.add_argument("--cross-config", action="store_true",
+                    help="Drop config_name from join keys (for ablation comparisons)")
     args = ap.parse_args()
 
     before_files = glob.glob(args.before) if any(c in args.before for c in "*?[") \
@@ -83,10 +85,15 @@ def main():
         return 1
 
     before = pd.concat([pd.read_csv(f) for f in before_files], ignore_index=True)
-    before = before[before["config_name"] == "baseline"].copy()
     after = pd.concat([pd.read_csv(f) for f in after_files], ignore_index=True)
 
-    merged = before.merge(after, on=JOIN_KEYS, suffixes=("_b", "_a"))
+    join_keys = list(JOIN_KEYS)
+    if args.cross_config:
+        join_keys = [k for k in join_keys if k != "config_name"]
+    else:
+        before = before[before["config_name"] == "baseline"].copy()
+
+    merged = before.merge(after, on=join_keys, suffixes=("_b", "_a"))
     n = len(merged)
     if n == 0:
         print("ERROR: zero rows joined -- check config_name + join keys", file=sys.stderr)
