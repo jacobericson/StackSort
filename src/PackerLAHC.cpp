@@ -218,6 +218,185 @@ static void RestoreSkylineState(Packer::PackContext& ctx, int gridW, int /*gridH
     ctx.skylineSnapSkyline.resize((size_t)b.skylineStart + (size_t)b.skylineCount);
 }
 
+// Shared best-scalar update for the two LAHC sites and the Path Relinking
+// site. Keeps bestScore / ctx.bestPl / best LER tuple / bestConc /
+// bestStranded / repairGridDirty / *outBestOrder in lockstep. Call-site-
+// specific counters (itersSinceImproved, bestIterInRestart0, diagBestFound*)
+// stay inline at the LAHC sites.
+static void UpdateBestFromCurrent(Packer::PackContext& ctx, long long& bestScore, long long newScore, int& bestLerA,
+                                  int newLerA, int& bestLerW, int newLerW, int& bestLerH, int newLerH, int& bestLerX,
+                                  int newLerX, int& bestLerY, int newLerY, double& bestConc, double newConc,
+                                  int& bestStranded, int newStranded, bool& repairGridDirty,
+                                  std::vector<Packer::Item>* outBestOrder, const std::vector<Packer::Item>& curOrder)
+{
+    bestScore       = newScore;
+    ctx.bestPl      = ctx.placements;
+    bestLerA        = newLerA;
+    bestLerW        = newLerW;
+    bestLerH        = newLerH;
+    bestLerX        = newLerX;
+    bestLerY        = newLerY;
+    bestConc        = newConc;
+    bestStranded    = newStranded;
+    repairGridDirty = true;
+    if (outBestOrder) *outBestOrder = curOrder;
+}
+
+// Count positions where two orderings' exactIds disagree. Used as the
+// diversity metric for Path Relinking elite admission — raw id-Hamming
+// would false-reject pairs that differ only by swapping same-exactId
+// siblings, which are packing-equivalent.
+static int PathRelinkExactIdHamming(const std::vector<Packer::Item>& a, const std::vector<Packer::Item>& b)
+{
+    int d    = 0;
+    size_t n = a.size();
+    if (b.size() != n) return (int)n;
+    for (size_t i = 0; i < n; ++i)
+        if (a[i].exactId != b[i].exactId) ++d;
+    return d;
+}
+
+// Capture curOrder into the elite pool. Two safety nets:
+//   - Normalize w/h/canRotate from originalItems so MOVE_ROTATE's in-place
+//     mutation of curOrder entries doesn't produce elites whose geometry
+//     diverges from their id.
+//   - Reject near-duplicates via exactId-Hamming < diversityThreshold.
+// Pool policy: append until cap, then replace weakest-scoring entry (only
+// if the new score is strictly higher).
+static void CapturePathRelinkElite(Packer::PackContext& ctx, const std::vector<Packer::Item>& curOrder,
+                                   const std::vector<Packer::Item>& originalItems, long long score, int eliteCap,
+                                   int diversityThreshold)
+{
+    std::vector<Packer::Item> normalized(curOrder);
+    for (size_t i = 0; i < normalized.size(); ++i)
+    {
+        int id = normalized[i].id;
+        if (id >= 0 && id < (int)originalItems.size())
+        {
+            normalized[i].w         = originalItems[id].w;
+            normalized[i].h         = originalItems[id].h;
+            normalized[i].canRotate = originalItems[id].canRotate;
+        }
+    }
+
+    for (size_t i = 0; i < ctx.pathRelinkElites.size(); ++i)
+    {
+        if (PathRelinkExactIdHamming(normalized, ctx.pathRelinkElites[i]) < diversityThreshold) return;
+    }
+
+    if ((int)ctx.pathRelinkElites.size() < eliteCap)
+    {
+        ctx.pathRelinkElites.push_back(normalized);
+        ctx.pathRelinkEliteScores.push_back(score);
+        return;
+    }
+
+    size_t weakest      = 0;
+    long long weakestSc = ctx.pathRelinkEliteScores[0];
+    for (size_t i = 1; i < ctx.pathRelinkEliteScores.size(); ++i)
+    {
+        if (ctx.pathRelinkEliteScores[i] < weakestSc)
+        {
+            weakest   = i;
+            weakestSc = ctx.pathRelinkEliteScores[i];
+        }
+    }
+    if (score > weakestSc)
+    {
+        ctx.pathRelinkElites[weakest]      = normalized;
+        ctx.pathRelinkEliteScores[weakest] = score;
+    }
+}
+
+// Walk a transposition path from s toward goalOrder, scoring every
+// intermediate. Any sc > bestScore commits as the new global best. Starts
+// with a cold SkylinePack to establish the snapshot log, then each
+// transposition reuses keptPrefix = leftmost swap position. Snapshot gate
+// mirrors the LAHC loop's so PR degrades gracefully when the restore is
+// unsafe (full cold re-pack instead).
+bool Packer::PathRelinkWalk(PackContext& ctx, int gridW, int gridH, std::vector<Item>& s,
+                            const std::vector<Item>& goalOrder, const std::vector<Item>& originalItems, int target,
+                            const volatile long* abortFlag, int bestReserveX, int bestReserveW, int effGroupingWeight,
+                            int effFragWeight, int effGroupingPower, long long& bestScore, int& bestLerA, int& bestLerW,
+                            int& bestLerH, int& bestLerX, int& bestLerY, double& bestConc, int& bestStranded,
+                            bool& repairGridDirty, std::vector<Item>* outBestOrder, long long endpointScore,
+                            int maxPathLen, int& diagIntermediatesScored, int& diagBestUpdates, int& diagAbortedPaths,
+                            long long& diagGainMax, long long& diagAvgPathLenSum)
+{
+    int n = (int)s.size();
+    if (n != (int)goalOrder.size()) return false;
+
+    ctx.skylineSnapValid = false;
+    SkylinePack(ctx, gridW, gridH, s, target, abortFlag, bestReserveX, bestReserveW);
+    if (abortFlag && *abortFlag != 0) return false;
+    if (!ctx.skylineSnapValid || ctx.skylineSnapN != n)
+    {
+        ++diagAbortedPaths;
+        return false;
+    }
+
+    bool improved = false;
+    int steps     = 0;
+    int p         = 0;
+    while (p < n && steps < maxPathLen)
+    {
+        if (abortFlag && *abortFlag != 0) break;
+        if (s[p].id == goalOrder[p].id)
+        {
+            ++p;
+            continue;
+        }
+
+        int q = -1;
+        for (int k = p + 1; k < n; ++k)
+        {
+            if (s[k].id == goalOrder[p].id)
+            {
+                q = k;
+                break;
+            }
+        }
+        if (q < 0)
+        {
+            ++diagAbortedPaths;
+            break;
+        }
+
+        std::swap(s[p], s[q]);
+        int keptPrefix = p;
+        ++steps;
+
+        bool canRestore =
+            ctx.skylineSnapValid && ctx.skylineSnapN == n && keptPrefix > 0 && keptPrefix < ctx.skylineSnapN;
+        int startIdx = canRestore ? keptPrefix : 0;
+        if (canRestore) RestoreSkylineState(ctx, gridW, gridH, keptPrefix);
+        SkylinePack(ctx, gridW, gridH, s, target, abortFlag, bestReserveX, bestReserveW, startIdx);
+        if (abortFlag && *abortFlag != 0) break;
+        ++diagIntermediatesScored;
+
+        int lerA, lerW, lerH, lerX, lerY, stranded = 0;
+        double conc = 0.0;
+        GridCacheLookup(ctx, gridW, gridH, lerA, lerW, lerH, lerX, lerY, conc, stranded);
+        long long grp = ComputeGroupingBonus(ctx.placements, originalItems, ctx, effGroupingPower);
+        long long sc  = ComputeScore(ctx.placements.size(), lerA, lerH, conc, target, CountRotated(ctx.placements), grp,
+                                     stranded, effGroupingWeight, effFragWeight);
+
+        if (sc > bestScore)
+        {
+            long long gain = sc - endpointScore;
+            diagGainMax    = std::max(gain, diagGainMax);
+            UpdateBestFromCurrent(ctx, bestScore, sc, bestLerA, lerA, bestLerW, lerW, bestLerH, lerH, bestLerX, lerX,
+                                  bestLerY, lerY, bestConc, conc, bestStranded, stranded, repairGridDirty, outBestOrder,
+                                  s);
+            ++diagBestUpdates;
+            improved = true;
+        }
+    }
+
+    diagAvgPathLenSum += steps;
+    return improved;
+}
+
 Packer::Result Packer::PackAnnealed(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim, int target,
                                     const volatile long* abortFlag, const std::vector<Item>* seedOrder,
                                     std::vector<Item>* outBestOrder, int skipLAHCIfAreaBelow,
@@ -345,21 +524,41 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     int effSoftGroupingPct =
         (params && params->softGroupingPct >= 0) ? params->softGroupingPct : Packer::DEFAULT_SOFT_GROUPING_PCT;
 
+    // Path Relinking: post-restart intensification over per-restart elites.
+    // Compiled default off to preserve baseline parity; flip via SearchParams
+    // or [features] enable_path_relinking. Guard all PR work beneath this flag
+    // so baseline runs are byte-identical.
+    bool enablePathRelinking =
+        (params && params->enablePathRelinking == 1) ||
+        (params && params->enablePathRelinking == -1 && Packer::DEFAULT_ENABLE_PATH_RELINKING != 0);
+    int effPathRelinkEliteCap =
+        (params && params->pathRelinkEliteCap > 0) ? params->pathRelinkEliteCap : Packer::DEFAULT_PATH_RELINK_ELITE_CAP;
+    int effPathRelinkDiversityPct = (params && params->pathRelinkDiversityPct >= 0)
+                                        ? params->pathRelinkDiversityPct
+                                        : Packer::DEFAULT_PATH_RELINK_DIVERSITY_PCT;
+    int effPathRelinkMaxPathLen   = (params && params->pathRelinkMaxPathLen > 0) ? params->pathRelinkMaxPathLen : 0;
+
     // Diagnostic counters — populated into *outDiag at the bottom of the function.
-    int diagPackCalls                 = 0;
-    int diagPlateauBreaks             = 0;
-    int diagLahcItersExecuted         = 0;
-    int diagBestFoundIter             = 0;
-    int diagBestFoundRestart          = 0;
-    bool diagUnconstrainedFallbackWon = false;
-    long long diagGreedySeedScore     = 0;
-    int diagGreedySeedLerArea         = 0;
-    int diagRepairMoveRolls           = 0;
-    int diagRepairMoveScans           = 0;
-    int diagRepairMoveHits            = 0;
-    int diagRepairMoveAccepts         = 0;
-    int diagSkylineSnapHits           = 0;
-    int diagSkylineSnapProbes         = 0;
+    int diagPackCalls                         = 0;
+    int diagPlateauBreaks                     = 0;
+    int diagLahcItersExecuted                 = 0;
+    int diagBestFoundIter                     = 0;
+    int diagBestFoundRestart                  = 0;
+    bool diagUnconstrainedFallbackWon         = false;
+    long long diagGreedySeedScore             = 0;
+    int diagGreedySeedLerArea                 = 0;
+    int diagRepairMoveRolls                   = 0;
+    int diagRepairMoveScans                   = 0;
+    int diagRepairMoveHits                    = 0;
+    int diagRepairMoveAccepts                 = 0;
+    int diagSkylineSnapHits                   = 0;
+    int diagSkylineSnapProbes                 = 0;
+    int diagPathRelinkPairsRun                = 0;
+    int diagPathRelinkIntermediatesScored     = 0;
+    int diagPathRelinkGlobalBestUpdates       = 0;
+    int diagPathRelinkAbortedPaths            = 0;
+    long long diagPathRelinkAvgPathLenSum     = 0;
+    long long diagPathRelinkGlobalBestGainMax = 0;
 
 #ifdef STACKSORT_PROFILE
     // Cycle accumulators for the LAHC inner loop. Unsigned so subtraction
@@ -380,6 +579,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     unsigned long long profOptimizeGrouping      = 0;
     unsigned long long profStripShift            = 0;
     unsigned long long profTileSwap              = 0;
+    unsigned long long profPathRelink            = 0;
     unsigned long long profBordersRaw            = 0;
 
     long long diagKeptPrefixSum = 0;
@@ -405,6 +605,11 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
     PackContext localCtx;
     PackContext& ctx = reuseCtx ? *reuseCtx : localCtx;
     InitPackContext(ctx, gridW, gridH, (int)items.size());
+    // Reset Path Relinking elite pool every call — reuseCtx would otherwise
+    // carry a prior pack's elites forward. Cheap because the vector usually
+    // holds at most eliteCap entries (default 8).
+    ctx.pathRelinkElites.clear();
+    ctx.pathRelinkEliteScores.clear();
     ctx.skylineWasteCoef           = effSkylineWasteCoef;
     ctx.tierWeightExact            = effTierWeightExact;
     ctx.tierWeightCustom           = effTierWeightCustom;
@@ -612,20 +817,16 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
 
         if (curScore > bestScore)
         {
-            bestScore       = curScore;
-            ctx.bestPl      = ctx.placements;
-            bestLerA        = curLerA;
-            bestLerW        = curLerW;
-            bestLerH        = curLerH;
-            bestLerX        = curLerX;
-            bestLerY        = curLerY;
-            bestConc        = curConc;
-            bestStranded    = curStranded;
-            repairGridDirty = true;
-            if (outBestOrder) *outBestOrder = curOrder;
+            UpdateBestFromCurrent(ctx, bestScore, curScore, bestLerA, curLerA, bestLerW, curLerW, bestLerH, curLerH,
+                                  bestLerX, curLerX, bestLerY, curLerY, bestConc, curConc, bestStranded, curStranded,
+                                  repairGridDirty, outBestOrder, curOrder);
             if (restart == 0) bestIterInRestart0 = 0;
             diagBestFoundIter    = 0;
             diagBestFoundRestart = restart;
+
+            if (enablePathRelinking)
+                CapturePathRelinkElite(ctx, curOrder, items, bestScore, effPathRelinkEliteCap,
+                                       (int)items.size() * effPathRelinkDiversityPct / 100);
         }
 
         // Fresh LAHC history per restart (vector allocated once above the loop)
@@ -935,21 +1136,17 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
                 curScore = candScore;
                 if (candScore > bestScore)
                 {
-                    bestScore          = candScore;
-                    ctx.bestPl         = ctx.placements;
-                    bestLerA           = candLerA;
-                    bestLerW           = candLerW;
-                    bestLerH           = candLerH;
-                    bestLerX           = candLerX;
-                    bestLerY           = candLerY;
-                    bestConc           = candConc;
-                    bestStranded       = candStranded;
-                    repairGridDirty    = true;
+                    UpdateBestFromCurrent(ctx, bestScore, candScore, bestLerA, candLerA, bestLerW, candLerW, bestLerH,
+                                          candLerH, bestLerX, candLerX, bestLerY, candLerY, bestConc, candConc,
+                                          bestStranded, candStranded, repairGridDirty, outBestOrder, curOrder);
                     itersSinceImproved = 0;
-                    if (outBestOrder) *outBestOrder = curOrder;
                     if (restart == 0) bestIterInRestart0 = iter;
                     diagBestFoundIter    = iter;
                     diagBestFoundRestart = restart;
+
+                    if (enablePathRelinking)
+                        CapturePathRelinkElite(ctx, curOrder, items, bestScore, effPathRelinkEliteCap,
+                                               (int)items.size() * effPathRelinkDiversityPct / 100);
                 }
                 else
                 {
@@ -980,6 +1177,17 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
             PROF_TICK(profAccept);
         }
 
+        // Per-restart elite capture for Path Relinking. After the LAHC inner
+        // loop exits (plateau or iter exhaustion), the current curOrder +
+        // curScore reflect this restart's latest accepted state — a local
+        // optimum in the LAHC sense. Capturing here, in addition to the
+        // global-best sites, guarantees the elite pool has up to R entries
+        // even when only restart 0 ever beats the global best. Diversity
+        // filter + cap inside CapturePathRelinkElite prevent duplicates.
+        if (enablePathRelinking)
+            CapturePathRelinkElite(ctx, curOrder, items, curScore, effPathRelinkEliteCap,
+                                   (int)items.size() * effPathRelinkDiversityPct / 100);
+
         // Adaptive: fast-converging cold starts skip restarts 2-3.
         // Disabled when seeded (seeds bias toward local optima).
         if (enableFastConverge && restart == 0 && seedOrder == NULL)
@@ -991,6 +1199,42 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
             }
         }
     }
+
+    // Path Relinking: after all restarts, walk transposition paths between
+    // captured elites. Each path intermediate re-packs via SkylinePack with
+    // keptPrefix = leftmost swap position and is scored; any strict
+    // improvement over the current bestScore commits via UpdateBestFromCurrent.
+    // Off unless enablePathRelinking; also skipped when the pool has < 2
+    // distinct elites (captures the FastConverge-collapsed case).
+    PROF_PHASE_BEGIN(pathRelink);
+    if (enablePathRelinking && ctx.pathRelinkElites.size() >= 2 && !(abortFlag && *abortFlag != 0))
+    {
+        int poolSize   = (int)ctx.pathRelinkElites.size();
+        int maxPathLen = (effPathRelinkMaxPathLen > 0) ? effPathRelinkMaxPathLen : (int)items.size();
+        // Scratch ordering mutated in place by PathRelinkWalk. Reserved once to
+        // avoid reallocation per pair.
+        std::vector<Item> prWorking;
+        prWorking.reserve(items.size());
+        for (int i = 0; i < poolSize; ++i)
+        {
+            for (int j = 0; j < poolSize; ++j)
+            {
+                if (i == j) continue;
+                if (abortFlag && *abortFlag != 0) break;
+                prWorking            = ctx.pathRelinkElites[i];
+                long long endpointSc = ctx.pathRelinkEliteScores[i];
+                PathRelinkWalk(ctx, gridW, gridH, prWorking, ctx.pathRelinkElites[j], items, target, abortFlag,
+                               bestReserveX, bestReserveW, effGroupingWeight, effFragWeight, effGroupingPower,
+                               bestScore, bestLerA, bestLerW, bestLerH, bestLerX, bestLerY, bestConc, bestStranded,
+                               repairGridDirty, outBestOrder, endpointSc, maxPathLen, diagPathRelinkIntermediatesScored,
+                               diagPathRelinkGlobalBestUpdates, diagPathRelinkAbortedPaths,
+                               diagPathRelinkGlobalBestGainMax, diagPathRelinkAvgPathLenSum);
+                ++diagPathRelinkPairsRun;
+            }
+            if (abortFlag && *abortFlag != 0) break;
+        }
+    }
+    PROF_PHASE_END(pathRelink, profPathRelink);
 
     // Unconstrained fallback: items may naturally leave a good gap without
     // being forced into an L-shape. Keep whichever scores higher.
@@ -1086,8 +1330,15 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         outDiag->stripShiftStripsImproved    = diagStripShiftStripsImproved;
         outDiag->tileSwapCandidatesFound     = diagTileSwapCandidatesFound;
         outDiag->tileSwapCandidatesCommitted = diagTileSwapCandidatesCommitted;
-        outDiag->skylineSnapHits             = diagSkylineSnapHits;
-        outDiag->skylineSnapProbes           = diagSkylineSnapProbes;
+
+        outDiag->pathRelinkPairsRun            = diagPathRelinkPairsRun;
+        outDiag->pathRelinkIntermediatesScored = diagPathRelinkIntermediatesScored;
+        outDiag->pathRelinkGlobalBestUpdates   = diagPathRelinkGlobalBestUpdates;
+        outDiag->pathRelinkAbortedPaths        = diagPathRelinkAbortedPaths;
+        outDiag->pathRelinkAvgPathLenSum       = diagPathRelinkAvgPathLenSum;
+        outDiag->pathRelinkGlobalBestGainMax   = diagPathRelinkGlobalBestGainMax;
+        outDiag->skylineSnapHits               = diagSkylineSnapHits;
+        outDiag->skylineSnapProbes             = diagSkylineSnapProbes;
         // Power-independent clustering metric for cross-power CSV/analysis.
         // Computed once per final result, not per LAHC iter.
         PROF_PHASE_BEGIN(bordersRaw);
@@ -1109,6 +1360,7 @@ Packer::Result Packer::PackAnnealedH(int gridW, int gridH, const std::vector<Ite
         outDiag->profCyclesOptimizeGrouping      = (long long)profOptimizeGrouping;
         outDiag->profCyclesStripShift            = (long long)profStripShift;
         outDiag->profCyclesTileSwap              = (long long)profTileSwap;
+        outDiag->profCyclesPathRelink            = (long long)profPathRelink;
         outDiag->profCyclesBordersRaw            = (long long)profBordersRaw;
         outDiag->keptPrefixSum                   = diagKeptPrefixSum;
         outDiag->keptPrefixCount                 = diagKeptPrefixCount;

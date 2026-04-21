@@ -497,6 +497,82 @@ def scoring_weight_ablation(df, rotate_all, baseline_name):
     return "\n".join(lines) if lines else None
 
 
+def path_relink_diagnostics_section(df, rotate_all, baseline_name):
+    sub = df[df["rotate_all"] == rotate_all]
+    if sub.empty or "path_relink_pairs_run" not in sub.columns:
+        return None
+    # Suppress the section entirely when no config in this slice has PR active.
+    active_mask = sub["path_relink_pairs_run"] > 0
+    if not active_mask.any():
+        return None
+
+    has_cycles = "fp_cycles_path_relink" in sub.columns
+
+    lines = []
+
+    configs = list(sub["config_name"].unique())
+    if baseline_name in configs:
+        configs.remove(baseline_name)
+        configs.insert(0, baseline_name)
+
+    lines.append("**Per-config PR activity** (means across seeds/instances/targets).")
+    lines.append("`update rate` = fraction of runs where PR strictly improved bestScore. "
+                 "`gain_max` is the best single-intermediate lift over its source endpoint across the run.")
+    lines.append("")
+    cycle_hdr = " | fp_cycles median | fp_cycles p90" if has_cycles else ""
+    cycle_sep = "---:|---:|" if has_cycles else ""
+    lines.append("| Config | pairs_run | intermediates | bestUpd/run | update rate | aborted | gain_max mean{} |".format(cycle_hdr))
+    lines.append("|---|---:|---:|---:|---:|---:|---:|{}".format(cycle_sep))
+
+    for cfg in configs:
+        c = sub[sub["config_name"] == cfg]
+        if c.empty:
+            continue
+        pairs = c["path_relink_pairs_run"].mean()
+        # If the config never activated PR, keep the row but print dashes so
+        # the baseline/feature contrast is visible at a glance.
+        if pairs == 0:
+            if has_cycles:
+                lines.append("| {} | 0 | 0 | 0 | 0.0% | 0 | 0 | - | - |".format(cfg))
+            else:
+                lines.append("| {} | 0 | 0 | 0 | 0.0% | 0 | 0 |".format(cfg))
+            continue
+        inters = c["path_relink_intermediates_scored"].mean()
+        best = c["path_relink_global_best_updates"].mean()
+        update_rate = (c["path_relink_global_best_updates"] > 0).mean()
+        aborted = c["path_relink_aborted_paths"].mean()
+        gain_max_mean = c["path_relink_global_best_gain_max"].mean()
+        row = "| {} | {:.1f} | {:.0f} | {:.2f} | {:.1%} | {:.2f} | {:.0f} |".format(
+            cfg, pairs, inters, best, update_rate, aborted, gain_max_mean)
+        if has_cycles:
+            cyc_med = c["fp_cycles_path_relink"].median()
+            cyc_p90 = c["fp_cycles_path_relink"].quantile(0.90)
+            row += " {:,.0f} | {:,.0f} |".format(cyc_med, cyc_p90)
+        lines.append(row)
+    lines.append("")
+
+    if has_cycles:
+        # PR cycle cost as fraction of wall-clock. wall_clock_ms is per-run
+        # elapsed (includes refine pass); converting to cycles at 3GHz lets us
+        # state PR's share without a provider-specific clock rate.
+        lines.append("**PR cycle share of total wall-clock** (assumes 3.0GHz; per-run median):")
+        lines.append("")
+        lines.append("| Config | wall_ms median | PR cycles / wall cycles |")
+        lines.append("|---|---:|---:|")
+        for cfg in configs:
+            c = sub[sub["config_name"] == cfg]
+            if c.empty:
+                continue
+            wall = c["wall_clock_ms"].median()
+            pr_cyc = c["fp_cycles_path_relink"].median()
+            wall_cyc = wall * 3_000_000.0  # ms * (3e6 cycles/ms)
+            share = (pr_cyc / wall_cyc) if wall_cyc > 0 else 0.0
+            lines.append("| {} | {:.1f} | {:.2%} |".format(cfg, wall, share))
+        lines.append("")
+
+    return "\n".join(lines) if lines else None
+
+
 def repair_diagnostics_section(df, rotate_all, baseline_name):
     sub = df[df["rotate_all"] == rotate_all]
     rolls_col = "repair_rolls" if "repair_rolls" in sub.columns else (
@@ -743,6 +819,13 @@ def report(df, baseline_name, schema_version):
             sections.append("### Repair move diagnostics")
             sections.append("")
             sections.append(rd)
+            sections.append("")
+
+        prd = path_relink_diagnostics_section(df, rot, baseline_name)
+        if prd:
+            sections.append("### Path Relinking diagnostics")
+            sections.append("")
+            sections.append(prd)
             sections.append("")
 
         sections.append("### Basin rate")

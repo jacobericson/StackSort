@@ -117,6 +117,15 @@ class Packer
     // bit-equivalence with legacy scoring.
     static const int DEFAULT_SOFT_GROUPING_PCT = 50;
 
+    // Path Relinking defaults. PR runs after the multi-restart LAHC loop,
+    // walking transposition paths between pairs of elites captured on global-
+    // best improvements. Off by default to preserve baseline parity; enable via
+    // SearchParams::enablePathRelinking or [features] enable_path_relinking.
+    static const int DEFAULT_ENABLE_PATH_RELINKING     = 1;
+    static const int DEFAULT_PATH_RELINK_ELITE_CAP     = 8; // R² pair count dominates cost
+    static const int DEFAULT_PATH_RELINK_DIVERSITY_PCT = 0; // 0 = no diversity filter (admit until cap)
+    static const int DEFAULT_PATH_RELINK_MAX_PATH_LEN  = 0; // 0 sentinel → use N (items.size)
+
     // Tunable LAHC search parameters. NULL = use compiled defaults.
     // Default constructor leaves all fields at sentinels so callers can
     // default-construct and override only the fields they care about.
@@ -179,6 +188,18 @@ class Packer
         // 0 disables the soft track; exact-match behavior is unchanged.
         int softGroupingPct;
 
+        // Path Relinking (post-restart intensification over per-restart elites).
+        // enablePathRelinking: -1 default, 0 off, 1 on.
+        // pathRelinkEliteCap: pool cap; <= 0 → compiled default.
+        // pathRelinkDiversityPct: exactId-Hamming diversity threshold as
+        //   percent of N (100 = reject any near-duplicate). -1 = default.
+        // pathRelinkMaxPathLen: hard cap on transpositions per pair;
+        //   <= 0 → use items.size().
+        int enablePathRelinking;
+        int pathRelinkEliteCap;
+        int pathRelinkDiversityPct;
+        int pathRelinkMaxPathLen;
+
         SearchParams()
             : numRestarts(-1), itersPerRestart(-1), lahcHistoryLen(-1), plateauThreshold(-1), rngSeed(0),
               enableBafSeed(-1), enableUnconstrainedFallback(-1), enableOptimizeGrouping(-1), enableFastConverge(-1),
@@ -186,7 +207,8 @@ class Packer
               moveInsertMax(-1), moveRotateMax(-1), scoringGroupingWeight(-1), scoringFragWeight(-1),
               groupingPowerQuarters(-1), skylineWasteCoef(-1), tierWeightExact(-1), tierWeightCustom(-1),
               tierWeightType(-1), tierWeightFunction(-1), tierWeightFlags(-1), funcSimFoodFoodRestricted(-1),
-              funcSimFirstaidRobotrepair(-1), softGroupingPct(-1)
+              funcSimFirstaidRobotrepair(-1), softGroupingPct(-1), enablePathRelinking(-1), pathRelinkEliteCap(-1),
+              pathRelinkDiversityPct(-1), pathRelinkMaxPathLen(-1)
         {
         }
 
@@ -227,6 +249,14 @@ class Packer
         int tileSwapCandidatesFound;     // (X, R, G) triples that passed feasibility
         int tileSwapCandidatesCommitted; // candidates that improved grouping
 
+        // Path Relinking diagnostics. Zero when enablePathRelinking is off.
+        int pathRelinkPairsRun;                // ordered (s, g) pairs walked (both directions)
+        int pathRelinkIntermediatesScored;     // total transposition steps evaluated
+        int pathRelinkGlobalBestUpdates;       // PR strictly beat bestScore
+        int pathRelinkAbortedPaths;            // snapshot stale / multiset mismatch / abort
+        long long pathRelinkAvgPathLenSum;     // sum of steps over all paths (avg = sum / pairsRun)
+        long long pathRelinkGlobalBestGainMax; // largest single-intermediate gain over its source endpoint
+
         // Power-independent clustering metric: Σ b per same-type connected
         // component on the final placement (no power exponent applied). The
         // harness uses this for cross-power heatmap comparisons since
@@ -264,6 +294,7 @@ class Packer
         long long profCyclesOptimizeGrouping;      // post-LAHC same-footprint swap
         long long profCyclesStripShift;            // post-LAHC strip permutation
         long long profCyclesTileSwap;              // post-LAHC multi-placement swap
+        long long profCyclesPathRelink;            // post-LAHC path relinking over elite pool
         long long profCyclesBordersRaw;            // final cross-power clustering metric
 
         // Sum/count instead of pre-computed rate so the harness can
@@ -294,16 +325,19 @@ class Packer
               unconstrainedFallbackWon(false), greedySeedScore(0), greedySeedLerArea(0), repairMoveRolls(0),
               repairMoveScans(0), repairMoveHits(0), repairMoveAccepts(0), stripShiftStripsFound(0),
               stripShiftStripsImproved(0), tileSwapCandidatesFound(0), tileSwapCandidatesCommitted(0),
+              pathRelinkPairsRun(0), pathRelinkIntermediatesScored(0), pathRelinkGlobalBestUpdates(0),
+              pathRelinkAbortedPaths(0), pathRelinkAvgPathLenSum(0), pathRelinkGlobalBestGainMax(0),
               groupingBordersRaw(0), groupingBonusExact(0), skylineSnapHits(0), skylineSnapProbes(0)
 #ifdef STACKSORT_PROFILE
               ,
               profCyclesMoveGen(0), profCyclesSkylinePack(0), profCyclesLer(0), profCyclesConcentration(0),
               profCyclesGrouping(0), profCyclesStranded(0), profCyclesScore(0), profCyclesAccept(0),
               profCyclesPreReservation(0), profCyclesGreedySeed(0), profCyclesUnconstrainedFallback(0),
-              profCyclesOptimizeGrouping(0), profCyclesStripShift(0), profCyclesTileSwap(0), profCyclesBordersRaw(0),
-              keptPrefixSum(0), keptPrefixCount(0), gridHashProbes(0), gridHashHits(0), profCyclesSkylinePrefix(0),
-              profCyclesSkylineWasteMap(0), profCyclesSkylineCandidate(0), profCyclesSkylineAdjacency(0),
-              profCyclesSkylineCommit(0), profCyclesLerHistogram(0), profCyclesLerStack(0)
+              profCyclesOptimizeGrouping(0), profCyclesStripShift(0), profCyclesTileSwap(0), profCyclesPathRelink(0),
+              profCyclesBordersRaw(0), keptPrefixSum(0), keptPrefixCount(0), gridHashProbes(0), gridHashHits(0),
+              profCyclesSkylinePrefix(0), profCyclesSkylineWasteMap(0), profCyclesSkylineCandidate(0),
+              profCyclesSkylineAdjacency(0), profCyclesSkylineCommit(0), profCyclesLerHistogram(0),
+              profCyclesLerStack(0)
 #endif
         {
         }
@@ -415,6 +449,15 @@ class Packer
         std::vector<Placement> seedPl;
         std::vector<Placement> bestPl;
 
+        // Path Relinking elite pool. Orderings captured on global-best
+        // improvements inside the multi-restart LAHC loop; walked pairwise
+        // after the loop exits. Items are normalized on capture (w/h/canRotate
+        // reset from the input items vector) to eliminate MOVE_ROTATE pollution.
+        // eliteScores[i] is the bestScore at capture time — used for diversity
+        // admission and for PR's strict-improvement gate.
+        std::vector<std::vector<Item> > pathRelinkElites;
+        std::vector<long long> pathRelinkEliteScores;
+
         // Tunables resolved per-pack from SearchParams. Populated in
         // PackAnnealedH/PackH before calling SkylinePack so the inner loop
         // doesn't take an extra parameter.
@@ -500,6 +543,21 @@ class Packer
                                 std::vector<Item>* outBestOrder = NULL, int skipLAHCIfAreaBelow = 0,
                                 const SearchParams* params = NULL, PackDiagnostics* outDiag = NULL,
                                 PackContext* reuseCtx = NULL);
+
+    // Path Relinking: walk a transposition path from `s` toward `goalOrder`,
+    // re-packing via SkylinePack (with startIdx = min swap position) and
+    // scoring every intermediate. Commits any score > bestScore as the new
+    // global best. Private static so it can call SkylinePack / scoring /
+    // grouping, which are also private. Mutates `s` in place.
+    static bool PathRelinkWalk(PackContext& ctx, int gridW, int gridH, std::vector<Item>& s,
+                               const std::vector<Item>& goalOrder, const std::vector<Item>& originalItems, int target,
+                               const volatile long* abortFlag, int bestReserveX, int bestReserveW,
+                               int effGroupingWeight, int effFragWeight, int effGroupingPower, long long& bestScore,
+                               int& bestLerA, int& bestLerW, int& bestLerH, int& bestLerX, int& bestLerY,
+                               double& bestConc, int& bestStranded, bool& repairGridDirty,
+                               std::vector<Item>* outBestOrder, long long endpointScore, int maxPathLen,
+                               int& diagIntermediatesScored, int& diagBestUpdates, int& diagAbortedPaths,
+                               long long& diagGainMax, long long& diagAvgPathLenSum);
 
     static void InitPackContext(PackContext& ctx, int gridW, int gridH, int numItems);
 

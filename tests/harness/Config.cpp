@@ -171,6 +171,7 @@ bool ParseConfigFile(const std::string& filePath, const Packer::SearchParams& ba
             else if (key == "enable_repair_move") out.params.enableRepairMove = flag;
             else if (key == "enable_strip_shift") out.params.enableStripShift = flag;
             else if (key == "enable_tile_swap") out.params.enableTileSwap = flag;
+            else if (key == "enable_path_relinking") out.params.enablePathRelinking = flag;
         }
         else if (section == "scoring")
         {
@@ -255,6 +256,21 @@ bool ParseConfigFile(const std::string& filePath, const Packer::SearchParams& ba
             else if (key == "item_threshold")
             {
                 if (!ParseInt(val, out.refineItemThreshold, errMsg, filePath, lineNum, key)) return false;
+            }
+        }
+        else if (section == "path_relinking")
+        {
+            if (key == "elite_cap")
+            {
+                if (!ParseInt(val, out.params.pathRelinkEliteCap, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "diversity_pct")
+            {
+                if (!ParseInt(val, out.params.pathRelinkDiversityPct, errMsg, filePath, lineNum, key)) return false;
+            }
+            else if (key == "max_path_len")
+            {
+                if (!ParseInt(val, out.params.pathRelinkMaxPathLen, errMsg, filePath, lineNum, key)) return false;
             }
         }
     }
