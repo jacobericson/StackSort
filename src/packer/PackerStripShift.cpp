@@ -18,7 +18,7 @@ namespace PostPack
 // ComputeGroupingBonusAdj path so exactId/soft-tier weights apply.
 
 void StripShift(std::vector<Placement>& placements, const std::vector<Item>& items, PackContext& ctx, int gridW,
-                int gridH, int groupingPowerQuarters, int* outStripsFound, int* outStripsImproved)
+                int gridH, int* outStripsFound, int* outStripsImproved)
 {
     (void)gridH;
 
@@ -163,7 +163,7 @@ void StripShift(std::vector<Placement>& placements, const std::vector<Item>& ite
 
             // Score identity first so we compare apples to apples.
             Scoring::BuildAdjGraph(g, placements);
-            long long bestScore = Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
+            long long bestScore = Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx);
             long long baseScore = bestScore;
 
             // Enumerate remaining permutations. next_permutation starts from
@@ -180,7 +180,7 @@ void StripShift(std::vector<Placement>& placements, const std::vector<Item>& ite
                 }
 
                 Scoring::BuildAdjGraph(g, placements);
-                long long score = Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
+                long long score = Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx);
                 if (score > bestScore)
                 {
                     bestScore = score;

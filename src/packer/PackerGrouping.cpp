@@ -255,19 +255,19 @@ long long FinalizeGroupingBonus(int n, int parent[], const int compBorders[], in
 // O(E) scorer over a prebuilt AdjGraph. Used by OptimizeGrouping / StripShift
 // / TileSwap where the same graph is re-scored many times per pack.
 long long ComputeGroupingBonusAdj(const std::vector<Placement>& placements, const std::vector<Item>& items,
-                                  const AdjGraph& g, int n, const PackContext& ctx, int groupingPowerQuarters)
+                                  const AdjGraph& g, int n, const PackContext& ctx)
 {
     if (n <= 1 || n > 256) return 0;
     int parent[256], compBorders[256], softParent[256], softCompBorders[256];
     AccumulateGroupingComponents(placements, items, ctx, n, &g, parent, compBorders, softParent, softCompBorders);
-    return FinalizeGroupingBonus(n, parent, compBorders, softParent, softCompBorders, groupingPowerQuarters, 5,
-                                 ctx.grouping.softGroupingPct, NULL);
+    return FinalizeGroupingBonus(n, parent, compBorders, softParent, softCompBorders, ctx.scoring.groupingPowerQuarters,
+                                 5, ctx.grouping.softGroupingPct, NULL);
 }
 
 // O(n²) scorer without a prebuilt graph. Used by the LAHC inner loop where
 // a graph rebuild per iter would just duplicate the same SharedBorder scans.
 long long ComputeGroupingBonus(const std::vector<Placement>& placements, const std::vector<Item>& items,
-                               const PackContext& ctx, int groupingPowerQuarters, long long* outExactOnly)
+                               const PackContext& ctx, long long* outExactOnly)
 {
     int n = (int)placements.size();
     if (n <= 1 || n > 256)
@@ -277,8 +277,8 @@ long long ComputeGroupingBonus(const std::vector<Placement>& placements, const s
     }
     int parent[256], compBorders[256], softParent[256], softCompBorders[256];
     AccumulateGroupingComponents(placements, items, ctx, n, NULL, parent, compBorders, softParent, softCompBorders);
-    return FinalizeGroupingBonus(n, parent, compBorders, softParent, softCompBorders, groupingPowerQuarters, 5,
-                                 ctx.grouping.softGroupingPct, outExactOnly);
+    return FinalizeGroupingBonus(n, parent, compBorders, softParent, softCompBorders, ctx.scoring.groupingPowerQuarters,
+                                 5, ctx.grouping.softGroupingPct, outExactOnly);
 }
 
 // Power-independent border total. Sums weighted Σ b per component with no
@@ -303,8 +303,7 @@ namespace PostPack
 // Swap same-footprint items to improve clustering.
 // Physical layout unchanged since occupied cells are identical.
 
-void OptimizeGrouping(std::vector<Placement>& placements, const std::vector<Item>& items, const PackContext& ctx,
-                      int groupingPowerQuarters)
+void OptimizeGrouping(std::vector<Placement>& placements, const std::vector<Item>& items, const PackContext& ctx)
 {
     int n = (int)placements.size();
     if (n <= 1 || n > 256) return;
@@ -384,7 +383,7 @@ void OptimizeGrouping(std::vector<Placement>& placements, const std::vector<Item
     while (improved)
     {
         improved              = false;
-        long long curGrouping = Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
+        long long curGrouping = Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx);
 
         for (int ci = 0; ci < numCandidates; ++ci)
         {
@@ -395,8 +394,7 @@ void OptimizeGrouping(std::vector<Placement>& placements, const std::vector<Item
             if (items[placements[pi].id].exactId == items[placements[pj].id].exactId) continue;
 
             std::swap(placements[pi].id, placements[pj].id);
-            long long newGrouping =
-                Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
+            long long newGrouping = Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx);
 
             if (newGrouping > curGrouping)
             {

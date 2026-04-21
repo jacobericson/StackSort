@@ -85,7 +85,9 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
     int effInsertMax = (params && params->moveInsertMax >= 0) ? params->moveInsertMax : MOVE_INSERT_MAX;
     int effRotateMax = (params && params->moveRotateMax >= 0) ? params->moveRotateMax : MOVE_ROTATE_MAX;
 
-    // Scoring weights. -1 = compile-time default.
+    // Scoring weights + grouping power. Written to ctx.scoring below so
+    // downstream scorers read from ctx instead of threaded parameters.
+    // -1 / sentinel <= 0 → compile-time default.
     int effGroupingWeight =
         (params && params->scoringGroupingWeight > 0) ? params->scoringGroupingWeight : DEFAULT_GROUPING_WEIGHT;
     int effFragWeight = (params && params->scoringFragWeight > 0) ? params->scoringFragWeight : DEFAULT_FRAG_WEIGHT;
@@ -227,6 +229,9 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
     ctx.pathRelink.elites.clear();
     ctx.pathRelink.eliteScores.clear();
     ctx.skylineWasteCoef                    = effSkylineWasteCoef;
+    ctx.scoring.groupingWeight              = effGroupingWeight;
+    ctx.scoring.fragWeight                  = effFragWeight;
+    ctx.scoring.groupingPowerQuarters       = effGroupingPower;
     ctx.grouping.tierWeightExact            = effTierWeightExact;
     ctx.grouping.tierWeightCustom           = effTierWeightCustom;
     ctx.grouping.tierWeightType             = effTierWeightType;
@@ -351,9 +356,9 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
     double seedConc = Ler::ComputeConcentrationAndStrandedCtx(ctx, gridW, gridH, seedLerX, seedLerY, seedLerW, seedLerH,
                                                               seedStranded);
     int seedNumRot  = Geometry::CountRotated(ctx.seedPl);
-    long long seedGrouping = Scoring::ComputeGroupingBonus(ctx.seedPl, items, ctx, effGroupingPower);
-    long long seedScore    = Scoring::ComputeScore(ctx.seedPl.size(), seedLerA, seedLerH, seedConc, target, seedNumRot,
-                                                   seedGrouping, seedStranded, effGroupingWeight, effFragWeight);
+    long long seedGrouping = Scoring::ComputeGroupingBonus(ctx.seedPl, items, ctx);
+    long long seedScore    = Scoring::ComputeScore(ctx, ctx.seedPl.size(), seedLerA, seedLerH, seedConc, target,
+                                                   seedNumRot, seedGrouping, seedStranded);
 
     diagGreedySeedScore   = seedScore;
     diagGreedySeedLerArea = seedLerA;
@@ -427,9 +432,9 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
         Cache::GridCacheLookup(ctx, gridW, gridH, curLerA, curLerW, curLerH, curLerX, curLerY, curConc, curStranded);
 #endif
         int curNumRot         = Geometry::CountRotated(ctx.placements);
-        long long curGrouping = Scoring::ComputeGroupingBonus(ctx.placements, items, ctx, effGroupingPower);
-        long long curScore = Scoring::ComputeScore(ctx.placements.size(), curLerA, curLerH, curConc, target, curNumRot,
-                                                   curGrouping, curStranded, effGroupingWeight, effFragWeight);
+        long long curGrouping = Scoring::ComputeGroupingBonus(ctx.placements, items, ctx);
+        long long curScore    = Scoring::ComputeScore(ctx, ctx.placements.size(), curLerA, curLerH, curConc, target,
+                                                      curNumRot, curGrouping, curStranded);
 
         if (curScore > bestScore)
         {
@@ -585,12 +590,11 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
             PROF_TICK(profConc);
 
             int candNumRot         = Geometry::CountRotated(ctx.placements);
-            long long candGrouping = Scoring::ComputeGroupingBonus(ctx.placements, items, ctx, effGroupingPower);
+            long long candGrouping = Scoring::ComputeGroupingBonus(ctx.placements, items, ctx);
             PROF_TICK(profGrouping);
 
-            long long candScore =
-                Scoring::ComputeScore(ctx.placements.size(), candLerA, candLerH, candConc, target, candNumRot,
-                                      candGrouping, candStranded, effGroupingWeight, effFragWeight);
+            long long candScore = Scoring::ComputeScore(ctx, ctx.placements.size(), candLerA, candLerH, candConc,
+                                                        target, candNumRot, candGrouping, candStranded);
             PROF_TICK(profScore);
 
             // LAHC acceptance
@@ -691,11 +695,11 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
                 prWorking            = ctx.pathRelink.elites[i];
                 long long endpointSc = ctx.pathRelink.eliteScores[i];
                 PathRelinkWalk(ctx, gridW, gridH, prWorking, ctx.pathRelink.elites[j], items, target, abortFlag,
-                               bestReserveX, bestReserveW, effGroupingWeight, effFragWeight, effGroupingPower,
-                               bestScore, bestLerA, bestLerW, bestLerH, bestLerX, bestLerY, bestConc, bestStranded,
-                               repairGridDirty, outBestOrder, endpointSc, maxPathLen, diagPathRelinkIntermediatesScored,
-                               diagPathRelinkGlobalBestUpdates, diagPathRelinkAbortedPaths,
-                               diagPathRelinkGlobalBestGainMax, diagPathRelinkAvgPathLenSum);
+                               bestReserveX, bestReserveW, bestScore, bestLerA, bestLerW, bestLerH, bestLerX, bestLerY,
+                               bestConc, bestStranded, repairGridDirty, outBestOrder, endpointSc, maxPathLen,
+                               diagPathRelinkIntermediatesScored, diagPathRelinkGlobalBestUpdates,
+                               diagPathRelinkAbortedPaths, diagPathRelinkGlobalBestGainMax,
+                               diagPathRelinkAvgPathLenSum);
                 ++diagPathRelinkPairsRun;
             }
             if (abortFlag && *abortFlag != 0) break;
@@ -711,15 +715,16 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
         Result unconResult = PackH(gridW, gridH, items, target, abortFlag, reuseCtx);
         diagPackCalls += 2; // PackH = BSSF + BAF internally
 
-        // Rescore under effective weights: PackH hardcodes defaults, bestScore doesn't.
+        // Rescore under effective weights: PackH uses its own ctx (seeded with
+        // DEFAULTs), but bestScore reflects the annealing ctx's overrides.
         if (unconResult.allPlaced)
         {
-            long long unGrouping = Scoring::ComputeGroupingBonus(unconResult.placements, items, ctx, effGroupingPower);
+            long long unGrouping      = Scoring::ComputeGroupingBonus(unconResult.placements, items, ctx);
             unconResult.groupingBonus = unGrouping;
             unconResult.score =
-                Scoring::ComputeScore(unconResult.placements.size(), unconResult.lerArea, unconResult.lerHeight,
+                Scoring::ComputeScore(ctx, unconResult.placements.size(), unconResult.lerArea, unconResult.lerHeight,
                                       unconResult.concentration, target, Geometry::CountRotated(unconResult.placements),
-                                      unGrouping, unconResult.strandedCells, effGroupingWeight, effFragWeight);
+                                      unGrouping, unconResult.strandedCells);
         }
 
         if (unconResult.allPlaced && unconResult.score > bestScore)
@@ -744,23 +749,22 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
 
     PROF_PHASE_BEGIN(stripShift);
     if (enableStripShift)
-        PostPack::StripShift(ctx.bestPl, items, ctx, gridW, gridH, effGroupingPower, &diagStripShiftStripsFound,
+        PostPack::StripShift(ctx.bestPl, items, ctx, gridW, gridH, &diagStripShiftStripsFound,
                              &diagStripShiftStripsImproved);
     PROF_PHASE_END(stripShift, profStripShift);
 
     PROF_PHASE_BEGIN(tileSwap);
     if (enableTileSwap)
-        PostPack::TileSwap(ctx.bestPl, items, ctx, gridW, gridH, effGroupingPower, &diagTileSwapCandidatesFound,
+        PostPack::TileSwap(ctx.bestPl, items, ctx, gridW, gridH, &diagTileSwapCandidatesFound,
                            &diagTileSwapCandidatesCommitted);
     PROF_PHASE_END(tileSwap, profTileSwap);
 
     PROF_PHASE_BEGIN(optGrp);
-    if (enableOptimizeGrouping) PostPack::OptimizeGrouping(ctx.bestPl, items, ctx, effGroupingPower);
+    if (enableOptimizeGrouping) PostPack::OptimizeGrouping(ctx.bestPl, items, ctx);
     PROF_PHASE_END(optGrp, profOptimizeGrouping);
 
     long long bestGroupingExact = 0;
-    long long bestGrouping =
-        Scoring::ComputeGroupingBonus(ctx.bestPl, items, ctx, effGroupingPower, &bestGroupingExact);
+    long long bestGrouping      = Scoring::ComputeGroupingBonus(ctx.bestPl, items, ctx, &bestGroupingExact);
 
     // Rotated flags relative to original input dims
     for (size_t i = 0; i < ctx.bestPl.size(); ++i)
@@ -778,8 +782,8 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
     result.strandedCells = bestStranded;
     result.groupingBonus = bestGrouping;
     result.allPlaced     = (ctx.bestPl.size() == items.size());
-    result.score         = Scoring::ComputeScore(ctx.bestPl.size(), bestLerA, bestLerH, bestConc, target, bestNumRot,
-                                                 bestGrouping, bestStranded, effGroupingWeight, effFragWeight);
+    result.score = Scoring::ComputeScore(ctx, ctx.bestPl.size(), bestLerA, bestLerH, bestConc, target, bestNumRot,
+                                         bestGrouping, bestStranded);
 
     if (outDiag)
     {

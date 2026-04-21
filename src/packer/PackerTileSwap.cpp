@@ -126,7 +126,7 @@ bool TileBacktrack(TileCtx& tc)
 } // namespace
 
 void TileSwap(std::vector<Placement>& placements, const std::vector<Item>& items, PackContext& ctx, int gridW,
-              int gridH, int groupingPowerQuarters, int* outCandidatesFound, int* outCandidatesCommitted)
+              int gridH, int* outCandidatesFound, int* outCandidatesCommitted)
 {
     int n = (int)placements.size();
     if (n <= 1 || n > 256) return;
@@ -137,7 +137,7 @@ void TileSwap(std::vector<Placement>& placements, const std::vector<Item>& items
 
     AdjGraph g;
     Scoring::BuildAdjGraph(g, placements);
-    long long curScore = Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
+    long long curScore = Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx);
 
     // For each placement X, try to find a rectangular region R elsewhere on
     // the grid with X's footprint (or rotated) such that R is covered
@@ -292,8 +292,7 @@ void TileSwap(std::vector<Placement>& placements, const std::vector<Item>& items
                     }
 
                     Scoring::BuildAdjGraph(g, placements);
-                    long long newScore =
-                        Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx, groupingPowerQuarters);
+                    long long newScore = Scoring::ComputeGroupingBonusAdj(placements, items, g, n, ctx);
 
                     if (newScore > curScore)
                     {

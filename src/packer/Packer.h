@@ -477,6 +477,19 @@ struct GroupingConfig
     int pairWeightMatrixN;
 };
 
+// Resolved scoring weights + grouping power exponent. Written once by
+// PackAnnealedH from SearchParams (or DEFAULT_* constants by
+// InitPackContext for non-annealed Pack calls). Consumed by ComputeScore,
+// ComputeGroupingBonus*, and the PostPack moves via ctx — not passed as
+// per-call parameters. Mirrors the skylineWasteCoef "resolved once lives
+// on ctx" pattern.
+struct ScoringConfig
+{
+    int groupingWeight;
+    int fragWeight;
+    int groupingPowerQuarters;
+};
+
 // Path Relinking elite pool. Orderings captured on global-best
 // improvements inside the multi-restart LAHC loop; walked pairwise
 // after the loop exits. Items are normalized on capture (w/h/canRotate
@@ -533,6 +546,7 @@ struct PackContext
     LerScratch ler;
     GridCache cache;
     GroupingConfig grouping;
+    ScoringConfig scoring;
     PathRelinkPool pathRelink;
 
     // Skyline tiebreaker knob (waste * coef - contact). Not grouping-
@@ -659,12 +673,12 @@ namespace Scoring
 // Unified scoring function — used by annealing, Pack(), and result comparison.
 // Internally H-mode: checks lerHeight >= target. W-mode arrives here
 // already transposed, so the H-mode semantics remain correct.
-// groupingWeight / fragWeight have no defaults — callers must pass the
-// resolved effective values (DEFAULT_* or SearchParams override).
+// Reads groupingWeight / fragWeight from ctx.scoring (seeded with DEFAULT_*
+// by InitPackContext, optionally overridden by PackAnnealedH).
 // groupingBonus is long long because the power exponent (b^(quarters/4))
 // can grow past int32 at higher quarters.
-long long ComputeScore(size_t numPlaced, int lerArea, int lerHeight, double concentration, int target, int numRotated,
-                       long long groupingBonus, int strandedCells, int groupingWeight, int fragWeight);
+long long ComputeScore(const PackContext& ctx, size_t numPlaced, int lerArea, int lerHeight, double concentration,
+                       int target, int numRotated, long long groupingBonus, int strandedCells);
 
 // Populate ctx.grouping.pairWeightMatrix before any per-iter scoring call.
 // Guard on softGroupingPct > 0 — the matrix is unused when the soft track
@@ -675,9 +689,10 @@ void BuildPairWeightMatrix(PackContext& ctx, const std::vector<Item>& items);
 // per-component b^(quarters/4) via applyGroupingPower (legacy). Soft track:
 // union-find on PairWeight > 0 (non-exact), per-component b^(5/4).
 // softGroupingPct == 0 skips the soft track entirely.
+// groupingPowerQuarters is read from ctx.scoring.
 // If outExactOnly != NULL, writes just the exact-track contribution there.
 long long ComputeGroupingBonus(const std::vector<Placement>& placements, const std::vector<Item>& items,
-                               const PackContext& ctx, int groupingPowerQuarters, long long* outExactOnly = NULL);
+                               const PackContext& ctx, long long* outExactOnly = NULL);
 
 // Power-independent companion: returns Σ b per component with no exponent
 // applied. Uses the same tier-weighted accumulator as ComputeGroupingBonus.
@@ -690,30 +705,29 @@ long long ComputeGroupingBordersRaw(const std::vector<Placement>& placements, co
 void BuildAdjGraph(AdjGraph& g, const std::vector<Placement>& placements);
 
 long long ComputeGroupingBonusAdj(const std::vector<Placement>& placements, const std::vector<Item>& items,
-                                  const AdjGraph& g, int n, const PackContext& ctx, int groupingPowerQuarters);
+                                  const AdjGraph& g, int n, const PackContext& ctx);
 } // namespace Scoring
 
 // Layout-invariant post-pack moves: cell occupancy preserved, only grouping
-// bonus can change.
+// bonus can change. groupingPowerQuarters is read from ctx.scoring.
 namespace PostPack
 {
 // Swap same-footprint items between positions to improve grouping.
 // Physical layout is unchanged since occupied cells are identical.
-void OptimizeGrouping(std::vector<Placement>& placements, const std::vector<Item>& items, const PackContext& ctx,
-                      int groupingPowerQuarters);
+void OptimizeGrouping(std::vector<Placement>& placements, const std::vector<Item>& items, const PackContext& ctx);
 
 // Permute items within strips (contiguous runs of same-(x,w)
 // or same-(y,h) placements). Cell occupancy preserved (strip footprint
 // unchanged). Updates placementIdGrid when committing a non-identity perm.
 void StripShift(std::vector<Placement>& placements, const std::vector<Item>& items, PackContext& ctx, int gridW,
-                int gridH, int groupingPowerQuarters, int* outStripsFound = NULL, int* outStripsImproved = NULL);
+                int gridH, int* outStripsFound = NULL, int* outStripsImproved = NULL);
 
 // Swap a single placement X with a rectangular union of multiple
 // placements G elsewhere. Cell occupancy preserved (both regions share
 // the same footprint). For rotated swaps, verifies G can tile X's
 // destination via corner-first backtracking.
 void TileSwap(std::vector<Placement>& placements, const std::vector<Item>& items, PackContext& ctx, int gridW,
-              int gridH, int groupingPowerQuarters, int* outCandidatesFound = NULL, int* outCandidatesCommitted = NULL);
+              int gridH, int* outCandidatesFound = NULL, int* outCandidatesCommitted = NULL);
 } // namespace PostPack
 
 // Public entry points + LAHC/PR orchestration. Callers reach the packer
@@ -751,14 +765,15 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
 // Path Relinking: walk a transposition path from `s` toward `goalOrder`,
 // re-packing via SkylinePack (with startIdx = min swap position) and
 // scoring every intermediate. Commits any score > bestScore as the new
-// global best. Mutates `s` in place.
+// global best. Mutates `s` in place. Scoring weights + power are read
+// from ctx.scoring.
 bool PathRelinkWalk(PackContext& ctx, int gridW, int gridH, std::vector<Item>& s, const std::vector<Item>& goalOrder,
                     const std::vector<Item>& originalItems, int target, const volatile long* abortFlag,
-                    int bestReserveX, int bestReserveW, int effGroupingWeight, int effFragWeight, int effGroupingPower,
-                    long long& bestScore, int& bestLerA, int& bestLerW, int& bestLerH, int& bestLerX, int& bestLerY,
-                    double& bestConc, int& bestStranded, bool& repairGridDirty, std::vector<Item>* outBestOrder,
-                    long long endpointScore, int maxPathLen, int& diagIntermediatesScored, int& diagBestUpdates,
-                    int& diagAbortedPaths, long long& diagGainMax, long long& diagAvgPathLenSum);
+                    int bestReserveX, int bestReserveW, long long& bestScore, int& bestLerA, int& bestLerW,
+                    int& bestLerH, int& bestLerX, int& bestLerY, double& bestConc, int& bestStranded,
+                    bool& repairGridDirty, std::vector<Item>* outBestOrder, long long endpointScore, int maxPathLen,
+                    int& diagIntermediatesScored, int& diagBestUpdates, int& diagAbortedPaths, long long& diagGainMax,
+                    long long& diagAvgPathLenSum);
 
 void InitPackContext(PackContext& ctx, int gridW, int gridH, int numItems);
 

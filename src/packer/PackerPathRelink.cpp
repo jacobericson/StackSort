@@ -87,11 +87,11 @@ void CapturePathRelinkElite(PackContext& ctx, const std::vector<Item>& curOrder,
 // unsafe (full cold re-pack instead).
 bool PathRelinkWalk(PackContext& ctx, int gridW, int gridH, std::vector<Item>& s, const std::vector<Item>& goalOrder,
                     const std::vector<Item>& originalItems, int target, const volatile long* abortFlag,
-                    int bestReserveX, int bestReserveW, int effGroupingWeight, int effFragWeight, int effGroupingPower,
-                    long long& bestScore, int& bestLerA, int& bestLerW, int& bestLerH, int& bestLerX, int& bestLerY,
-                    double& bestConc, int& bestStranded, bool& repairGridDirty, std::vector<Item>* outBestOrder,
-                    long long endpointScore, int maxPathLen, int& diagIntermediatesScored, int& diagBestUpdates,
-                    int& diagAbortedPaths, long long& diagGainMax, long long& diagAvgPathLenSum)
+                    int bestReserveX, int bestReserveW, long long& bestScore, int& bestLerA, int& bestLerW,
+                    int& bestLerH, int& bestLerX, int& bestLerY, double& bestConc, int& bestStranded,
+                    bool& repairGridDirty, std::vector<Item>* outBestOrder, long long endpointScore, int maxPathLen,
+                    int& diagIntermediatesScored, int& diagBestUpdates, int& diagAbortedPaths, long long& diagGainMax,
+                    long long& diagAvgPathLenSum)
 {
     int n = (int)s.size();
     if (n != (int)goalOrder.size()) return false;
@@ -147,10 +147,9 @@ bool PathRelinkWalk(PackContext& ctx, int gridW, int gridH, std::vector<Item>& s
         int lerA, lerW, lerH, lerX, lerY, stranded = 0;
         double conc = 0.0;
         Cache::GridCacheLookup(ctx, gridW, gridH, lerA, lerW, lerH, lerX, lerY, conc, stranded);
-        long long grp = Scoring::ComputeGroupingBonus(ctx.placements, originalItems, ctx, effGroupingPower);
-        long long sc  = Scoring::ComputeScore(ctx.placements.size(), lerA, lerH, conc, target,
-                                              Geometry::CountRotated(ctx.placements), grp, stranded, effGroupingWeight,
-                                              effFragWeight);
+        long long grp = Scoring::ComputeGroupingBonus(ctx.placements, originalItems, ctx);
+        long long sc  = Scoring::ComputeScore(ctx, ctx.placements.size(), lerA, lerH, conc, target,
+                                              Geometry::CountRotated(ctx.placements), grp, stranded);
 
         if (sc > bestScore)
         {

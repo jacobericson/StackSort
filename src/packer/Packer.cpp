@@ -101,6 +101,9 @@ void InitPackContext(PackContext& ctx, int gridW, int gridH, int numItems)
     ctx.seedPl.reserve(numItems);
     ctx.bestPl.reserve(numItems);
     ctx.skylineWasteCoef                    = DEFAULT_SKYLINE_WASTE_COEF;
+    ctx.scoring.groupingWeight              = DEFAULT_GROUPING_WEIGHT;
+    ctx.scoring.fragWeight                  = DEFAULT_FRAG_WEIGHT;
+    ctx.scoring.groupingPowerQuarters       = DEFAULT_GROUPING_POWER_QUARTERS;
     ctx.grouping.tierWeightExact            = DEFAULT_TIER_WEIGHT_EXACT;
     ctx.grouping.tierWeightCustom           = DEFAULT_TIER_WEIGHT_CUSTOM;
     ctx.grouping.tierWeightType             = DEFAULT_TIER_WEIGHT_TYPE;
@@ -224,13 +227,13 @@ Result PackH(int gridW, int gridH, const std::vector<Item>& items, int target, c
     result.concentration = Ler::ComputeConcentrationAndStrandedCtx(
         ctx, gridW, gridH, result.lerX, result.lerY, result.lerWidth, result.lerHeight, result.strandedCells);
 
-    // Score — PackH has no SearchParams plumbing, so use compile-time defaults.
-    int numRot         = Geometry::CountRotated(result.placements);
-    long long grouping = Scoring::ComputeGroupingBonus(result.placements, items, ctx, DEFAULT_GROUPING_POWER_QUARTERS);
+    // Score — PackH uses the compile-time defaults already seeded into
+    // ctx.scoring by InitPackContext; no SearchParams plumbing here.
+    int numRot           = Geometry::CountRotated(result.placements);
+    long long grouping   = Scoring::ComputeGroupingBonus(result.placements, items, ctx);
     result.groupingBonus = grouping;
-    result.score =
-        Scoring::ComputeScore(result.placements.size(), result.lerArea, result.lerHeight, result.concentration, target,
-                              numRot, grouping, result.strandedCells, DEFAULT_GROUPING_WEIGHT, DEFAULT_FRAG_WEIGHT);
+    result.score         = Scoring::ComputeScore(ctx, result.placements.size(), result.lerArea, result.lerHeight,
+                                                 result.concentration, target, numRot, grouping, result.strandedCells);
 
     return result;
 }

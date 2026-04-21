@@ -223,8 +223,9 @@ def main():
                          "reduces scheduler-migration noise in non-profile "
                          "runs. The env-var mask is honored by both harness "
                          "builds (default mask = 1 when unset).")
-    ap.add_argument("--pin-base-core", type=int, default=0,
-                    help="First core used when --pin-shards is set. Pair "
+    ap.add_argument("--pin-base-core", type=int, default=1,
+                    help="First core used when --pin-shards is set. Default "
+                         "1 leaves core 0 for the orchestrator/poller. Pair "
                          "two run_matrix invocations on a 16-core machine "
                          "by offsetting one of them.")
     ap.add_argument("--keep-shards", action="store_true",
