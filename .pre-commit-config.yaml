@@ -20,6 +20,6 @@ repos:
         entry: clang-tidy -p tests/harness --config-file=tests/harness/.clang-tidy --quiet
         language: system
         types_or: [c, c++]
-        files: ^(src/Packer.*|tests/harness/.*)\.(cpp|h)$
+        files: ^(src/packer/.*|tests/harness/.*)\.(cpp|h)$
         require_serial: true
         verbose: true    # surface findings even on pass

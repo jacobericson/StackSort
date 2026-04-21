@@ -43,12 +43,12 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(ProjectDir)..\resources\KenshiLib\Include;$(ProjectDir)..\boost_1_60_0;$(ProjectDir)src;$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir)..\resources\KenshiLib\Include;$(ProjectDir)..\boost_1_60_0;$(ProjectDir)src\packer;$(ProjectDir)src\plugin;$(ProjectDir)src\ui;$(ProjectDir)src\worker;$(ProjectDir)src\common;$(IncludePath)</IncludePath>
     <LibraryPath>$(ProjectDir)..\resources\KenshiLib\Libraries\KenshiLib;$(ProjectDir)..\resources\KenshiLib\Libraries\mygui;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>$(ProjectDir)..\resources\KenshiLib\Include;$(ProjectDir)..\boost_1_60_0;$(ProjectDir)src;$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir)..\resources\KenshiLib\Include;$(ProjectDir)..\boost_1_60_0;$(ProjectDir)src\packer;$(ProjectDir)src\plugin;$(ProjectDir)src\ui;$(ProjectDir)src\worker;$(ProjectDir)src\common;$(IncludePath)</IncludePath>
     <LibraryPath>$(ProjectDir)..\resources\KenshiLib\Libraries\KenshiLib;$(ProjectDir)..\resources\KenshiLib\Libraries\mygui;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -78,15 +78,15 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="src\StackSort.cpp" />
-    <ClCompile Include="src\StackSortUI.cpp" />
-    <ClCompile Include="src\Packer.cpp" />
-    <ClCompile Include="src\SortWorker.cpp" />
+    <ClCompile Include="src\plugin\StackSort.cpp" />
+    <ClCompile Include="src\ui\StackSortUI.cpp" />
+    <ClCompile Include="src\packer\Packer.cpp" />
+    <ClCompile Include="src\worker\SortWorker.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="src\Packer.h" />
-    <ClInclude Include="src\SortWorker.h" />
-    <ClInclude Include="src\StackSortUI.h" />
+    <ClInclude Include="src\packer\Packer.h" />
+    <ClInclude Include="src\worker\SortWorker.h" />
+    <ClInclude Include="src\ui\StackSortUI.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
