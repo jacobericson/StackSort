@@ -15,6 +15,17 @@ enum TargetDim
     TARGET_W = 1
 };
 
+// Grid + free-space-constraint spec. Threaded through every Pack/Heuristics/
+// PathRelink entry point as a single reference instead of three int params.
+// gridW/gridH are the inventory grid; target is the LER side (height in
+// H-mode, width in W-mode after transpose) that scoring tries to satisfy.
+struct GridSpec
+{
+    int gridW;
+    int gridH;
+    int target;
+};
+
 struct Item
 {
     int id;
@@ -213,6 +224,21 @@ struct SearchParams
     {
         return SearchParams();
     }
+};
+
+// Path-Relinking diagnostic accumulator. PathRelinkWalk increments these
+// in-place per intermediate; the LAHC orchestrator owns one instance and
+// fans the totals into PackDiagnostics's pathRelink* fields after all
+// walks complete. Bundles 5 out-refs into 1 reference parameter.
+struct PathRelinkDiag
+{
+    int intermediatesScored;
+    int globalBestUpdates;
+    int abortedPaths;
+    long long gainMax;
+    long long avgPathLenSum;
+
+    PathRelinkDiag() : intermediatesScored(0), globalBestUpdates(0), abortedPaths(0), gainMax(0), avgPathLenSum(0) {}
 };
 
 // Diagnostic counters filled by PackAnnealed when outDiag is non-NULL.
@@ -490,6 +516,39 @@ struct ScoringConfig
     int groupingPowerQuarters;
 };
 
+// Repair-move scratch: cached ctx.bestPl occupancy + LER reachability +
+// stranded-cell list. Rebuilt lazily when dirty. Lives on PackContext so
+// UpdateBestFromCurrent / PathRelinkWalk can mark dirty without carrying
+// the flag as a parameter, and so TryRepairMove's buffers don't need to
+// be threaded. Semantics:
+//   - grid[i]       = 1 if cell i covered by a ctx.bestPl placement, else 0
+//   - reachable[i]  = 1 if cell i connected to ctx.bestPl's LER via empty cells
+//   - strandedList  = interior empty cells not in reachable (repair targets)
+//   - dirty         = true when ctx.bestPl changed since the last rebuild;
+//                     set on every global-best update + at start of every pack
+struct RepairScratch
+{
+    std::vector<unsigned char> grid;
+    std::vector<unsigned char> reachable;
+    std::vector<int> strandedList;
+    bool dirty;
+};
+
+// LAHC best/cur/cand state tuple. Replaces 8 parallel scalars each at the
+// three loop scopes plus PathRelinkWalk / TryRepairMove / UpdateBestFromCurrent
+// signatures. Copyable by value; no heap members.
+struct PackState
+{
+    long long score;
+    int lerArea;
+    int lerWidth;
+    int lerHeight;
+    int lerX;
+    int lerY;
+    double concentration;
+    int strandedCells;
+};
+
 // Path Relinking elite pool. Orderings captured on global-best
 // improvements inside the multi-restart LAHC loop; walked pairwise
 // after the loop exits. Items are normalized on capture (w/h/canRotate
@@ -547,6 +606,7 @@ struct PackContext
     GridCache cache;
     GroupingConfig grouping;
     ScoringConfig scoring;
+    RepairScratch repair;
     PathRelinkPool pathRelink;
 
     // Skyline tiebreaker knob (waste * coef - contact). Not grouping-
@@ -648,22 +708,22 @@ bool GridCacheLookup(PackContext& ctx, int gridW, int gridH, int& outLerArea, in
 namespace Heuristics
 {
 // MAXRECTS placement with selectable heuristic.
-// target reserves the bottom `target` rows; items prefer placement above.
+// dims.target reserves the bottom `target` rows; items prefer placement above.
 // When reserveW > 0, pre-places a virtual obstacle at (reserveX, reserveY)
 // and uses single-pass placement (hard constraint). reserveW == 0 = soft two-pass.
 // heuristic: 0 = BSSF (Best Short Side Fit), 1 = BAF (Best Area Fit).
 // Writes results into ctx.placements.
-void MaxRectsPack(PackContext& ctx, int gridW, int gridH, const std::vector<Item>& items, int target,
+void MaxRectsPack(PackContext& ctx, const GridSpec& dims, const std::vector<Item>& items,
                   const volatile long* abortFlag = NULL, int reserveX = 0, int reserveW = 0, int heuristic = 0);
 
 // Skyline Bottom-Left packer — faster than MAXRECTS for annealing.
 // When reserveW > 0, items cannot overlap the reserved rectangle at
-// (reserveX, reserveY, reserveW, target) — hard constraint.
+// (reserveX, reserveY, reserveW, dims.target) — hard constraint.
 // reserveW == 0 = existing soft two-pass reserve.
 // Writes results into ctx.placements.
 // startIdx > 0 requires caller to have restored ctx state from a prior
 // run's snapshot at boundary[startIdx].
-void SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vector<Item>& items, int target,
+void SkylinePack(PackContext& ctx, const GridSpec& dims, const std::vector<Item>& items,
                  const volatile long* abortFlag = NULL, int reserveX = 0, int reserveW = 0, int startIdx = 0);
 } // namespace Heuristics
 
@@ -737,8 +797,8 @@ namespace Search
 // Run the full packing pipeline: sort, MAXRECTS place, compute LER, score.
 // If abortFlag is non-NULL, checked per-item; returns partial result on abort.
 // W-mode transposes internally, so placements/LER come back in original space.
-Result Pack(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim, int target,
-            const volatile long* abortFlag = NULL, PackContext* reuseCtx = NULL);
+Result Pack(const GridSpec& dims, const std::vector<Item>& items, TargetDim dim, const volatile long* abortFlag = NULL,
+            PackContext* reuseCtx = NULL);
 
 // Greedy seed + LAHC (Late Acceptance Hill Climbing). Used by worker thread.
 // seedOrder: if non-NULL, use as restart 0's initial ordering (warm start).
@@ -747,33 +807,31 @@ Result Pack(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim,
 // params: if non-NULL, overrides LAHC constants and ablation flags.
 // outDiag: if non-NULL, receives diagnostic counters for the harness/tuner.
 // W-mode transposes internally.
-Result PackAnnealed(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim, int target,
+Result PackAnnealed(const GridSpec& dims, const std::vector<Item>& items, TargetDim dim,
                     const volatile long* abortFlag = NULL, const std::vector<Item>* seedOrder = NULL,
                     std::vector<Item>* outBestOrder = NULL, int skipLAHCIfAreaBelow = 0,
                     const SearchParams* params = NULL, PackDiagnostics* outDiag = NULL, PackContext* reuseCtx = NULL);
 
 // H-mode implementations of Pack/PackAnnealed. The public Pack/PackAnnealed
 // dispatch here directly for TARGET_H and via a transpose wrapper for TARGET_W.
-Result PackH(int gridW, int gridH, const std::vector<Item>& items, int target, const volatile long* abortFlag = NULL,
+Result PackH(const GridSpec& dims, const std::vector<Item>& items, const volatile long* abortFlag = NULL,
              PackContext* reuseCtx = NULL);
 
-Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int target,
-                     const volatile long* abortFlag = NULL, const std::vector<Item>* seedOrder = NULL,
-                     std::vector<Item>* outBestOrder = NULL, int skipLAHCIfAreaBelow = 0,
-                     const SearchParams* params = NULL, PackDiagnostics* outDiag = NULL, PackContext* reuseCtx = NULL);
+Result PackAnnealedH(const GridSpec& dims, const std::vector<Item>& items, const volatile long* abortFlag = NULL,
+                     const std::vector<Item>* seedOrder = NULL, std::vector<Item>* outBestOrder = NULL,
+                     int skipLAHCIfAreaBelow = 0, const SearchParams* params = NULL, PackDiagnostics* outDiag = NULL,
+                     PackContext* reuseCtx = NULL);
 
 // Path Relinking: walk a transposition path from `s` toward `goalOrder`,
 // re-packing via SkylinePack (with startIdx = min swap position) and
-// scoring every intermediate. Commits any score > bestScore as the new
-// global best. Mutates `s` in place. Scoring weights + power are read
-// from ctx.scoring.
-bool PathRelinkWalk(PackContext& ctx, int gridW, int gridH, std::vector<Item>& s, const std::vector<Item>& goalOrder,
-                    const std::vector<Item>& originalItems, int target, const volatile long* abortFlag,
-                    int bestReserveX, int bestReserveW, long long& bestScore, int& bestLerA, int& bestLerW,
-                    int& bestLerH, int& bestLerX, int& bestLerY, double& bestConc, int& bestStranded,
-                    bool& repairGridDirty, std::vector<Item>* outBestOrder, long long endpointScore, int maxPathLen,
-                    int& diagIntermediatesScored, int& diagBestUpdates, int& diagAbortedPaths, long long& diagGainMax,
-                    long long& diagAvgPathLenSum);
+// scoring every intermediate. Commits any score > bestState.score as the
+// new global best. Mutates `s` in place. Scoring weights + power are read
+// from ctx.scoring; repair-dirty flag is toggled on ctx.repair.dirty.
+// Diagnostic counters accumulate into `diag` (caller owns lifetime).
+bool PathRelinkWalk(PackContext& ctx, const GridSpec& dims, std::vector<Item>& s, const std::vector<Item>& goalOrder,
+                    const std::vector<Item>& originalItems, const volatile long* abortFlag, int bestReserveX,
+                    int bestReserveW, PackState& bestState, std::vector<Item>* outBestOrder, long long endpointScore,
+                    int maxPathLen, PathRelinkDiag& diag);
 
 void InitPackContext(PackContext& ctx, int gridW, int gridH, int numItems);
 

@@ -85,23 +85,24 @@ void CapturePathRelinkElite(PackContext& ctx, const std::vector<Item>& curOrder,
 // transposition reuses keptPrefix = leftmost swap position. Snapshot gate
 // mirrors the LAHC loop's so PR degrades gracefully when the restore is
 // unsafe (full cold re-pack instead).
-bool PathRelinkWalk(PackContext& ctx, int gridW, int gridH, std::vector<Item>& s, const std::vector<Item>& goalOrder,
-                    const std::vector<Item>& originalItems, int target, const volatile long* abortFlag,
-                    int bestReserveX, int bestReserveW, long long& bestScore, int& bestLerA, int& bestLerW,
-                    int& bestLerH, int& bestLerX, int& bestLerY, double& bestConc, int& bestStranded,
-                    bool& repairGridDirty, std::vector<Item>* outBestOrder, long long endpointScore, int maxPathLen,
-                    int& diagIntermediatesScored, int& diagBestUpdates, int& diagAbortedPaths, long long& diagGainMax,
-                    long long& diagAvgPathLenSum)
+bool PathRelinkWalk(PackContext& ctx, const GridSpec& dims, std::vector<Item>& s, const std::vector<Item>& goalOrder,
+                    const std::vector<Item>& originalItems, const volatile long* abortFlag, int bestReserveX,
+                    int bestReserveW, PackState& bestState, std::vector<Item>* outBestOrder, long long endpointScore,
+                    int maxPathLen, PathRelinkDiag& diag)
 {
+    const int gridW  = dims.gridW;
+    const int gridH  = dims.gridH;
+    const int target = dims.target;
+
     int n = (int)s.size();
     if (n != (int)goalOrder.size()) return false;
 
     ctx.skyline.snapValid = false;
-    Heuristics::SkylinePack(ctx, gridW, gridH, s, target, abortFlag, bestReserveX, bestReserveW);
+    Heuristics::SkylinePack(ctx, dims, s, abortFlag, bestReserveX, bestReserveW);
     if (abortFlag && *abortFlag != 0) return false;
     if (!ctx.skyline.snapValid || ctx.skyline.snapN != n)
     {
-        ++diagAbortedPaths;
+        ++diag.abortedPaths;
         return false;
     }
 
@@ -128,7 +129,7 @@ bool PathRelinkWalk(PackContext& ctx, int gridW, int gridH, std::vector<Item>& s
         }
         if (q < 0)
         {
-            ++diagAbortedPaths;
+            ++diag.abortedPaths;
             break;
         }
 
@@ -140,30 +141,31 @@ bool PathRelinkWalk(PackContext& ctx, int gridW, int gridH, std::vector<Item>& s
             ctx.skyline.snapValid && ctx.skyline.snapN == n && keptPrefix > 0 && keptPrefix < ctx.skyline.snapN;
         int startIdx = canRestore ? keptPrefix : 0;
         if (canRestore) RestoreSkylineState(ctx, gridW, gridH, keptPrefix);
-        Heuristics::SkylinePack(ctx, gridW, gridH, s, target, abortFlag, bestReserveX, bestReserveW, startIdx);
+        Heuristics::SkylinePack(ctx, dims, s, abortFlag, bestReserveX, bestReserveW, startIdx);
         if (abortFlag && *abortFlag != 0) break;
-        ++diagIntermediatesScored;
+        ++diag.intermediatesScored;
 
-        int lerA, lerW, lerH, lerX, lerY, stranded = 0;
-        double conc = 0.0;
-        Cache::GridCacheLookup(ctx, gridW, gridH, lerA, lerW, lerH, lerX, lerY, conc, stranded);
-        long long grp = Scoring::ComputeGroupingBonus(ctx.placements, originalItems, ctx);
-        long long sc  = Scoring::ComputeScore(ctx, ctx.placements.size(), lerA, lerH, conc, target,
-                                              Geometry::CountRotated(ctx.placements), grp, stranded);
+        PackState candState;
+        candState.strandedCells = 0;
+        candState.concentration = 0.0;
+        Cache::GridCacheLookup(ctx, gridW, gridH, candState.lerArea, candState.lerWidth, candState.lerHeight,
+                               candState.lerX, candState.lerY, candState.concentration, candState.strandedCells);
+        long long grp   = Scoring::ComputeGroupingBonus(ctx.placements, originalItems, ctx);
+        candState.score = Scoring::ComputeScore(ctx, ctx.placements.size(), candState.lerArea, candState.lerHeight,
+                                                candState.concentration, target, Geometry::CountRotated(ctx.placements),
+                                                grp, candState.strandedCells);
 
-        if (sc > bestScore)
+        if (candState.score > bestState.score)
         {
-            long long gain = sc - endpointScore;
-            diagGainMax    = std::max(gain, diagGainMax);
-            UpdateBestFromCurrent(ctx, bestScore, sc, bestLerA, lerA, bestLerW, lerW, bestLerH, lerH, bestLerX, lerX,
-                                  bestLerY, lerY, bestConc, conc, bestStranded, stranded, repairGridDirty, outBestOrder,
-                                  s);
-            ++diagBestUpdates;
+            long long gain = candState.score - endpointScore;
+            diag.gainMax   = std::max(gain, diag.gainMax);
+            UpdateBestFromCurrent(ctx, bestState, candState, outBestOrder, s);
+            ++diag.globalBestUpdates;
             improved = true;
         }
     }
 
-    diagAvgPathLenSum += steps;
+    diag.avgPathLenSum += steps;
     return improved;
 }
 

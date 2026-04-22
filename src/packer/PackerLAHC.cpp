@@ -12,14 +12,13 @@ namespace Packer
 namespace Search
 {
 
-Result PackAnnealed(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim, int target,
-                    const volatile long* abortFlag, const std::vector<Item>* seedOrder, std::vector<Item>* outBestOrder,
-                    int skipLAHCIfAreaBelow, const SearchParams* params, PackDiagnostics* outDiag,
-                    PackContext* reuseCtx)
+Result PackAnnealed(const GridSpec& dims, const std::vector<Item>& items, TargetDim dim, const volatile long* abortFlag,
+                    const std::vector<Item>* seedOrder, std::vector<Item>* outBestOrder, int skipLAHCIfAreaBelow,
+                    const SearchParams* params, PackDiagnostics* outDiag, PackContext* reuseCtx)
 {
     if (dim == TARGET_H)
-        return PackAnnealedH(gridW, gridH, items, target, abortFlag, seedOrder, outBestOrder, skipLAHCIfAreaBelow,
-                             params, outDiag, reuseCtx);
+        return PackAnnealedH(dims, items, abortFlag, seedOrder, outBestOrder, skipLAHCIfAreaBelow, params, outDiag,
+                             reuseCtx);
 
     // W-mode: transpose inputs, run H-mode, transpose outputs.
     std::vector<Item> itemsT = items;
@@ -36,9 +35,12 @@ Result PackAnnealed(int gridW, int gridH, const std::vector<Item>& items, Target
         seedTPtr = &seedT;
     }
 
-    // NOLINTNEXTLINE(readability-suspicious-call-argument) — W-mode transpose: itemsT has w/h swapped and placements are swapped back after the call.
-    Result r = PackAnnealedH(gridH, gridW, itemsT, target, abortFlag, seedTPtr, outBestOrder, skipLAHCIfAreaBelow,
-                             params, outDiag, reuseCtx);
+    GridSpec dimsT;
+    dimsT.gridW  = dims.gridH;
+    dimsT.gridH  = dims.gridW;
+    dimsT.target = dims.target;
+    Result r =
+        PackAnnealedH(dimsT, itemsT, abortFlag, seedTPtr, outBestOrder, skipLAHCIfAreaBelow, params, outDiag, reuseCtx);
 
     for (size_t i = 0; i < r.placements.size(); ++i)
     {
@@ -57,10 +59,13 @@ Result PackAnnealed(int gridW, int gridH, const std::vector<Item>& items, Target
     return r;
 }
 
-Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int target, const volatile long* abortFlag,
+Result PackAnnealedH(const GridSpec& dims, const std::vector<Item>& items, const volatile long* abortFlag,
                      const std::vector<Item>* seedOrder, std::vector<Item>* outBestOrder, int skipLAHCIfAreaBelow,
                      const SearchParams* params, PackDiagnostics* outDiag, PackContext* reuseCtx)
 {
+    const int gridW  = dims.gridW;
+    const int gridH  = dims.gridH;
+    const int target = dims.target;
     // Resolve effective LAHC parameters. Positive overrides win; <= 0 means
     // "use compiled default" (sentinel set by SearchParams default ctor).
     int effRestarts = (params && params->numRestarts > 0) ? params->numRestarts : NUM_RESTARTS;
@@ -157,26 +162,22 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
         (params && params->lateBiasUniformPct >= 0) ? params->lateBiasUniformPct : DEFAULT_LATE_BIAS_UNIFORM_PCT;
 
     // Diagnostic counters — populated into *outDiag at the bottom of the function.
-    int diagPackCalls                         = 0;
-    int diagPlateauBreaks                     = 0;
-    int diagLahcItersExecuted                 = 0;
-    int diagBestFoundIter                     = 0;
-    int diagBestFoundRestart                  = 0;
-    bool diagUnconstrainedFallbackWon         = false;
-    long long diagGreedySeedScore             = 0;
-    int diagGreedySeedLerArea                 = 0;
-    int diagRepairMoveRolls                   = 0;
-    int diagRepairMoveScans                   = 0;
-    int diagRepairMoveHits                    = 0;
-    int diagRepairMoveAccepts                 = 0;
-    int diagSkylineSnapHits                   = 0;
-    int diagSkylineSnapProbes                 = 0;
-    int diagPathRelinkPairsRun                = 0;
-    int diagPathRelinkIntermediatesScored     = 0;
-    int diagPathRelinkGlobalBestUpdates       = 0;
-    int diagPathRelinkAbortedPaths            = 0;
-    long long diagPathRelinkAvgPathLenSum     = 0;
-    long long diagPathRelinkGlobalBestGainMax = 0;
+    int diagPackCalls                 = 0;
+    int diagPlateauBreaks             = 0;
+    int diagLahcItersExecuted         = 0;
+    int diagBestFoundIter             = 0;
+    int diagBestFoundRestart          = 0;
+    bool diagUnconstrainedFallbackWon = false;
+    long long diagGreedySeedScore     = 0;
+    int diagGreedySeedLerArea         = 0;
+    int diagRepairMoveRolls           = 0;
+    int diagRepairMoveScans           = 0;
+    int diagRepairMoveHits            = 0;
+    int diagRepairMoveAccepts         = 0;
+    int diagSkylineSnapHits           = 0;
+    int diagSkylineSnapProbes         = 0;
+    int diagPathRelinkPairsRun        = 0;
+    PathRelinkDiag prDiag;
 
 #ifdef STACKSORT_PROFILE
     // Cycle accumulators for the LAHC inner loop. Unsigned so subtraction
@@ -209,7 +210,7 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
     // Trivial cases — just do a single greedy pack
     if (items.size() <= 2)
     {
-        Result r = PackH(gridW, gridH, items, target, abortFlag, reuseCtx);
+        Result r = PackH(dims, items, abortFlag, reuseCtx);
         if (outDiag)
         {
             outDiag->packCalls         = 2; // PackH runs BSSF + BAF internally
@@ -262,7 +263,7 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
         {
             if (abortFlag && *abortFlag != 0) break;
             int rx = gridW - w;
-            Heuristics::MaxRectsPack(ctx, gridW, gridH, order, target, abortFlag, rx, w);
+            Heuristics::MaxRectsPack(ctx, dims, order, abortFlag, rx, w);
             ++diagPackCalls;
             if ((int)ctx.placements.size() == (int)items.size())
             {
@@ -281,7 +282,7 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
         int upperBound = bestReserveW * target;
         if (upperBound < skipLAHCIfAreaBelow)
         {
-            Result quickResult = PackH(gridW, gridH, items, target, abortFlag, reuseCtx);
+            Result quickResult = PackH(dims, items, abortFlag, reuseCtx);
             if (outBestOrder) *outBestOrder = order;
             if (outDiag)
             {
@@ -295,7 +296,7 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
 
     // Greedy seed: run BSSF. If enableBafSeed, also run BAF and keep whichever placed more.
     PROF_PHASE_BEGIN(greedy);
-    Heuristics::MaxRectsPack(ctx, gridW, gridH, order, target, abortFlag, bestReserveX, bestReserveW, 0); // BSSF
+    Heuristics::MaxRectsPack(ctx, dims, order, abortFlag, bestReserveX, bestReserveW, 0); // BSSF
     ++diagPackCalls;
     if (abortFlag && *abortFlag != 0)
     {
@@ -319,7 +320,7 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
 
     if (enableBafSeed)
     {
-        Heuristics::MaxRectsPack(ctx, gridW, gridH, order, target, abortFlag, bestReserveX, bestReserveW, 1); // BAF
+        Heuristics::MaxRectsPack(ctx, dims, order, abortFlag, bestReserveX, bestReserveW, 1); // BAF
         ++diagPackCalls;
         if (abortFlag && *abortFlag != 0)
         {
@@ -350,29 +351,27 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
     PROF_PHASE_END(greedy, profGreedySeed);
 
     Grid::BuildOccupancyGrid(ctx, gridW, gridH);
-    int seedLerA, seedLerW, seedLerH, seedLerX, seedLerY;
-    Ler::ComputeLERCtx(ctx, &ctx.grid[0], gridW, gridH, seedLerA, seedLerW, seedLerH, seedLerX, seedLerY);
-    int seedStranded = 0;
-    double seedConc = Ler::ComputeConcentrationAndStrandedCtx(ctx, gridW, gridH, seedLerX, seedLerY, seedLerW, seedLerH,
-                                                              seedStranded);
-    int seedNumRot  = Geometry::CountRotated(ctx.seedPl);
+    PackState bestState;
+    bestState.strandedCells = 0;
+    Ler::ComputeLERCtx(ctx, &ctx.grid[0], gridW, gridH, bestState.lerArea, bestState.lerWidth, bestState.lerHeight,
+                       bestState.lerX, bestState.lerY);
+    bestState.concentration =
+        Ler::ComputeConcentrationAndStrandedCtx(ctx, gridW, gridH, bestState.lerX, bestState.lerY, bestState.lerWidth,
+                                                bestState.lerHeight, bestState.strandedCells);
+    int seedNumRot         = Geometry::CountRotated(ctx.seedPl);
     long long seedGrouping = Scoring::ComputeGroupingBonus(ctx.seedPl, items, ctx);
-    long long seedScore    = Scoring::ComputeScore(ctx, ctx.seedPl.size(), seedLerA, seedLerH, seedConc, target,
-                                                   seedNumRot, seedGrouping, seedStranded);
+    bestState.score =
+        Scoring::ComputeScore(ctx, ctx.seedPl.size(), bestState.lerArea, bestState.lerHeight, bestState.concentration,
+                              target, seedNumRot, seedGrouping, bestState.strandedCells);
 
-    diagGreedySeedScore   = seedScore;
-    diagGreedySeedLerArea = seedLerA;
+    diagGreedySeedScore   = bestState.score;
+    diagGreedySeedLerArea = bestState.lerArea;
 
-    // Best solution tracking
-    ctx.bestPl          = ctx.seedPl;
-    long long bestScore = seedScore;
-    int bestLerA        = seedLerA;
-    int bestLerW        = seedLerW;
-    int bestLerH        = seedLerH;
-    int bestLerX        = seedLerX;
-    int bestLerY        = seedLerY;
-    double bestConc     = seedConc;
-    int bestStranded    = seedStranded;
+    // Best solution tracking. ctx.bestPl holds the best placements; bestState
+    // carries the matching LER / score / concentration / stranded tuple.
+    // ctx.repair.dirty (set true by InitPackContext) pairs with bestState —
+    // repair-move scratch rebuilds on every global-best update.
+    ctx.bestPl = ctx.seedPl;
 
     if (outBestOrder) *outBestOrder = order;
 
@@ -385,14 +384,6 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
     int effectiveRestarts  = effRestarts;
     int bestIterInRestart0 = -1;
     std::vector<long long> history(effHistLen);
-
-    // Cached ctx.bestPl occupancy grid + LER reachability for repair moves.
-    // Only rebuilt when ctx.bestPl changes (dirty flag).
-    int totalCellsRepair = gridW * gridH;
-    std::vector<unsigned char> repairGrid(totalCellsRepair);
-    std::vector<unsigned char> repairReachable(totalCellsRepair);
-    std::vector<int> repairStrandedList; // interior cells not reachable from LER
-    bool repairGridDirty = true;
 
     // Outside the restart loop so copy-assign reuses capacity instead
     // of allocating per restart.
@@ -414,45 +405,46 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
 #endif
 
         // Pack the restart seed
-        Heuristics::SkylinePack(ctx, gridW, gridH, curOrder, target, abortFlag, bestReserveX, bestReserveW);
+        Heuristics::SkylinePack(ctx, dims, curOrder, abortFlag, bestReserveX, bestReserveW);
         ++diagPackCalls;
         if (abortFlag && *abortFlag != 0) break;
         // ctx.grid is maintained incrementally inside SkylinePack — no
         // BuildOccupancyGrid rebuild needed before the scorer reads it.
 
-        int curLerA, curLerW, curLerH, curLerX, curLerY;
-        int curStranded = 0;
-        double curConc  = 0.0;
+        PackState curState;
+        curState.strandedCells = 0;
+        curState.concentration = 0.0;
 #ifdef STACKSORT_PROFILE
-        bool curCacheHit = Cache::GridCacheLookup(ctx, gridW, gridH, curLerA, curLerW, curLerH, curLerX, curLerY,
-                                                  curConc, curStranded);
+        bool curCacheHit =
+            Cache::GridCacheLookup(ctx, gridW, gridH, curState.lerArea, curState.lerWidth, curState.lerHeight,
+                                   curState.lerX, curState.lerY, curState.concentration, curState.strandedCells);
         ++diagGridHashProbes;
         if (curCacheHit) ++diagGridHashHits;
 #else
-        Cache::GridCacheLookup(ctx, gridW, gridH, curLerA, curLerW, curLerH, curLerX, curLerY, curConc, curStranded);
+        Cache::GridCacheLookup(ctx, gridW, gridH, curState.lerArea, curState.lerWidth, curState.lerHeight,
+                               curState.lerX, curState.lerY, curState.concentration, curState.strandedCells);
 #endif
         int curNumRot         = Geometry::CountRotated(ctx.placements);
         long long curGrouping = Scoring::ComputeGroupingBonus(ctx.placements, items, ctx);
-        long long curScore    = Scoring::ComputeScore(ctx, ctx.placements.size(), curLerA, curLerH, curConc, target,
-                                                      curNumRot, curGrouping, curStranded);
+        curState.score =
+            Scoring::ComputeScore(ctx, ctx.placements.size(), curState.lerArea, curState.lerHeight,
+                                  curState.concentration, target, curNumRot, curGrouping, curState.strandedCells);
 
-        if (curScore > bestScore)
+        if (curState.score > bestState.score)
         {
-            UpdateBestFromCurrent(ctx, bestScore, curScore, bestLerA, curLerA, bestLerW, curLerW, bestLerH, curLerH,
-                                  bestLerX, curLerX, bestLerY, curLerY, bestConc, curConc, bestStranded, curStranded,
-                                  repairGridDirty, outBestOrder, curOrder);
+            UpdateBestFromCurrent(ctx, bestState, curState, outBestOrder, curOrder);
             if (restart == 0) bestIterInRestart0 = 0;
             diagBestFoundIter    = 0;
             diagBestFoundRestart = restart;
 
             if (enablePathRelinking)
-                CapturePathRelinkElite(ctx, curOrder, items, bestScore, effPathRelinkEliteCap,
+                CapturePathRelinkElite(ctx, curOrder, items, bestState.score, effPathRelinkEliteCap,
                                        (int)items.size() * effPathRelinkDiversityPct / 100);
         }
 
         // Fresh LAHC history per restart (vector allocated once above the loop)
         for (int i = 0; i < effHistLen; ++i)
-            history[i] = curScore;
+            history[i] = curState.score;
 
         int itersSinceImproved = 0;
 
@@ -532,10 +524,8 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
                 // promotes a fitting item to position 0 in curOrder; falls
                 // back to random swap if no repair target found.
                 ++diagRepairMoveRolls;
-                TryRepairMove(ctx, gridW, gridH, curOrder, n, move, rng, bestLerX, bestLerY, bestLerW, bestLerH,
-                              bestStranded, repairGrid, repairReachable, repairStrandedList, repairGridDirty,
-                              totalCellsRepair, effLateBiasAlphaQ, effLateBiasUniformPct, diagRepairMoveScans,
-                              diagRepairMoveHits);
+                TryRepairMove(ctx, gridW, gridH, curOrder, n, move, rng, bestState, effLateBiasAlphaQ,
+                              effLateBiasUniformPct, diagRepairMoveScans, diagRepairMoveHits);
             }
 
             // Fraction of curOrder preserved by this move. REPAIR-hit sets
@@ -564,24 +554,24 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
             PROF_TICK(profMoveGen);
 
             // Pack with perturbed order
-            Heuristics::SkylinePack(ctx, gridW, gridH, curOrder, target, abortFlag, bestReserveX, bestReserveW,
-                                    startIdx);
+            Heuristics::SkylinePack(ctx, dims, curOrder, abortFlag, bestReserveX, bestReserveW, startIdx);
             ++diagPackCalls;
             if (abortFlag && *abortFlag != 0) break;
 
             PROF_TICK(profSkyline);
 
-            int candLerA, candLerW, candLerH, candLerX, candLerY;
-            int candStranded = 0;
-            double candConc  = 0.0;
+            PackState candState;
+            candState.strandedCells = 0;
+            candState.concentration = 0.0;
 #ifdef STACKSORT_PROFILE
-            bool candCacheHit = Cache::GridCacheLookup(ctx, gridW, gridH, candLerA, candLerW, candLerH, candLerX,
-                                                       candLerY, candConc, candStranded);
+            bool candCacheHit = Cache::GridCacheLookup(ctx, gridW, gridH, candState.lerArea, candState.lerWidth,
+                                                       candState.lerHeight, candState.lerX, candState.lerY,
+                                                       candState.concentration, candState.strandedCells);
             ++diagGridHashProbes;
             if (candCacheHit) ++diagGridHashHits;
 #else
-            Cache::GridCacheLookup(ctx, gridW, gridH, candLerA, candLerW, candLerH, candLerX, candLerY, candConc,
-                                   candStranded);
+            Cache::GridCacheLookup(ctx, gridW, gridH, candState.lerArea, candState.lerWidth, candState.lerHeight,
+                                   candState.lerX, candState.lerY, candState.concentration, candState.strandedCells);
 #endif
             // profConc's tick is preserved even though the cache attributes
             // all its work to profLer — skipping it would fold those cycles
@@ -593,30 +583,29 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
             long long candGrouping = Scoring::ComputeGroupingBonus(ctx.placements, items, ctx);
             PROF_TICK(profGrouping);
 
-            long long candScore = Scoring::ComputeScore(ctx, ctx.placements.size(), candLerA, candLerH, candConc,
-                                                        target, candNumRot, candGrouping, candStranded);
+            candState.score = Scoring::ComputeScore(ctx, ctx.placements.size(), candState.lerArea, candState.lerHeight,
+                                                    candState.concentration, target, candNumRot, candGrouping,
+                                                    candState.strandedCells);
             PROF_TICK(profScore);
 
             // LAHC acceptance
             int hi      = iter % effHistLen;
-            bool accept = (candScore >= curScore || candScore >= history[hi]);
+            bool accept = (candState.score >= curState.score || candState.score >= history[hi]);
 
             if (accept)
             {
                 if (move.type == MOVE_REPAIR) ++diagRepairMoveAccepts;
-                curScore = candScore;
-                if (candScore > bestScore)
+                curState = candState;
+                if (candState.score > bestState.score)
                 {
-                    UpdateBestFromCurrent(ctx, bestScore, candScore, bestLerA, candLerA, bestLerW, candLerW, bestLerH,
-                                          candLerH, bestLerX, candLerX, bestLerY, candLerY, bestConc, candConc,
-                                          bestStranded, candStranded, repairGridDirty, outBestOrder, curOrder);
+                    UpdateBestFromCurrent(ctx, bestState, candState, outBestOrder, curOrder);
                     itersSinceImproved = 0;
                     if (restart == 0) bestIterInRestart0 = iter;
                     diagBestFoundIter    = iter;
                     diagBestFoundRestart = restart;
 
                     if (enablePathRelinking)
-                        CapturePathRelinkElite(ctx, curOrder, items, bestScore, effPathRelinkEliteCap,
+                        CapturePathRelinkElite(ctx, curOrder, items, bestState.score, effPathRelinkEliteCap,
                                                (int)items.size() * effPathRelinkDiversityPct / 100);
                 }
                 else
@@ -634,7 +623,7 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
                 ctx.skyline.snapValid = false;
             }
 
-            history[hi] = curScore;
+            history[hi] = curState.score;
 
             // Plateau detection: if no global-best improvement for a full
             // LAHC history cycle, this restart has converged. End early.
@@ -650,21 +639,21 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
 
         // Per-restart elite capture for Path Relinking. After the LAHC inner
         // loop exits (plateau or iter exhaustion), the current curOrder +
-        // curScore reflect this restart's latest accepted state — a local
+        // curState reflect this restart's latest accepted state — a local
         // optimum in the LAHC sense. Capturing here, in addition to the
         // global-best sites, guarantees the elite pool has up to R entries
         // even when only restart 0 ever beats the global best. Diversity
         // filter + cap inside CapturePathRelinkElite prevent duplicates.
         if (enablePathRelinking)
-            CapturePathRelinkElite(ctx, curOrder, items, curScore, effPathRelinkEliteCap,
+            CapturePathRelinkElite(ctx, curOrder, items, curState.score, effPathRelinkEliteCap,
                                    (int)items.size() * effPathRelinkDiversityPct / 100);
 
         // Adaptive: fast-converging cold starts skip restarts 2-3.
         // Disabled when seeded (seeds bias toward local optima).
         if (enableFastConverge && restart == 0 && seedOrder == NULL)
         {
-            if (bestIterInRestart0 >= 0 && bestIterInRestart0 < FAST_CONVERGE_ITER && bestConc > GOOD_CONC_THRESHOLD &&
-                ctx.bestPl.size() == items.size())
+            if (bestIterInRestart0 >= 0 && bestIterInRestart0 < FAST_CONVERGE_ITER &&
+                bestState.concentration > GOOD_CONC_THRESHOLD && ctx.bestPl.size() == items.size())
             {
                 effectiveRestarts = 2;
             }
@@ -694,12 +683,8 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
                 if (abortFlag && *abortFlag != 0) break;
                 prWorking            = ctx.pathRelink.elites[i];
                 long long endpointSc = ctx.pathRelink.eliteScores[i];
-                PathRelinkWalk(ctx, gridW, gridH, prWorking, ctx.pathRelink.elites[j], items, target, abortFlag,
-                               bestReserveX, bestReserveW, bestScore, bestLerA, bestLerW, bestLerH, bestLerX, bestLerY,
-                               bestConc, bestStranded, repairGridDirty, outBestOrder, endpointSc, maxPathLen,
-                               diagPathRelinkIntermediatesScored, diagPathRelinkGlobalBestUpdates,
-                               diagPathRelinkAbortedPaths, diagPathRelinkGlobalBestGainMax,
-                               diagPathRelinkAvgPathLenSum);
+                PathRelinkWalk(ctx, dims, prWorking, ctx.pathRelink.elites[j], items, abortFlag, bestReserveX,
+                               bestReserveW, bestState, outBestOrder, endpointSc, maxPathLen, prDiag);
                 ++diagPathRelinkPairsRun;
             }
             if (abortFlag && *abortFlag != 0) break;
@@ -712,7 +697,7 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
     PROF_PHASE_BEGIN(unc);
     if (enableUnconstrainedFallback && bestReserveW > 0 && !(abortFlag && *abortFlag != 0))
     {
-        Result unconResult = PackH(gridW, gridH, items, target, abortFlag, reuseCtx);
+        Result unconResult = PackH(dims, items, abortFlag, reuseCtx);
         diagPackCalls += 2; // PackH = BSSF + BAF internally
 
         // Rescore under effective weights: PackH uses its own ctx (seeded with
@@ -727,16 +712,18 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
                                       unGrouping, unconResult.strandedCells);
         }
 
-        if (unconResult.allPlaced && unconResult.score > bestScore)
+        if (unconResult.allPlaced && unconResult.score > bestState.score)
         {
             ctx.bestPl                   = unconResult.placements;
-            bestLerA                     = unconResult.lerArea;
-            bestLerW                     = unconResult.lerWidth;
-            bestLerH                     = unconResult.lerHeight;
-            bestLerX                     = unconResult.lerX;
-            bestLerY                     = unconResult.lerY;
-            bestConc                     = unconResult.concentration;
-            bestStranded                 = unconResult.strandedCells;
+            bestState.score              = unconResult.score;
+            bestState.lerArea            = unconResult.lerArea;
+            bestState.lerWidth           = unconResult.lerWidth;
+            bestState.lerHeight          = unconResult.lerHeight;
+            bestState.lerX               = unconResult.lerX;
+            bestState.lerY               = unconResult.lerY;
+            bestState.concentration      = unconResult.concentration;
+            bestState.strandedCells      = unconResult.strandedCells;
+            ctx.repair.dirty             = true;
             diagUnconstrainedFallbackWon = true;
         }
     }
@@ -773,17 +760,18 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
 
     Result result;
     result.placements    = ctx.bestPl;
-    result.lerArea       = bestLerA;
-    result.lerWidth      = bestLerW;
-    result.lerHeight     = bestLerH;
-    result.lerX          = bestLerX;
-    result.lerY          = bestLerY;
-    result.concentration = bestConc;
-    result.strandedCells = bestStranded;
+    result.lerArea       = bestState.lerArea;
+    result.lerWidth      = bestState.lerWidth;
+    result.lerHeight     = bestState.lerHeight;
+    result.lerX          = bestState.lerX;
+    result.lerY          = bestState.lerY;
+    result.concentration = bestState.concentration;
+    result.strandedCells = bestState.strandedCells;
     result.groupingBonus = bestGrouping;
     result.allPlaced     = (ctx.bestPl.size() == items.size());
-    result.score = Scoring::ComputeScore(ctx, ctx.bestPl.size(), bestLerA, bestLerH, bestConc, target, bestNumRot,
-                                         bestGrouping, bestStranded);
+    result.score =
+        Scoring::ComputeScore(ctx, ctx.bestPl.size(), bestState.lerArea, bestState.lerHeight, bestState.concentration,
+                              target, bestNumRot, bestGrouping, bestState.strandedCells);
 
     if (outDiag)
     {
@@ -805,11 +793,11 @@ Result PackAnnealedH(int gridW, int gridH, const std::vector<Item>& items, int t
         outDiag->tileSwapCandidatesCommitted = diagTileSwapCandidatesCommitted;
 
         outDiag->pathRelinkPairsRun            = diagPathRelinkPairsRun;
-        outDiag->pathRelinkIntermediatesScored = diagPathRelinkIntermediatesScored;
-        outDiag->pathRelinkGlobalBestUpdates   = diagPathRelinkGlobalBestUpdates;
-        outDiag->pathRelinkAbortedPaths        = diagPathRelinkAbortedPaths;
-        outDiag->pathRelinkAvgPathLenSum       = diagPathRelinkAvgPathLenSum;
-        outDiag->pathRelinkGlobalBestGainMax   = diagPathRelinkGlobalBestGainMax;
+        outDiag->pathRelinkIntermediatesScored = prDiag.intermediatesScored;
+        outDiag->pathRelinkGlobalBestUpdates   = prDiag.globalBestUpdates;
+        outDiag->pathRelinkAbortedPaths        = prDiag.abortedPaths;
+        outDiag->pathRelinkAvgPathLenSum       = prDiag.avgPathLenSum;
+        outDiag->pathRelinkGlobalBestGainMax   = prDiag.gainMax;
         outDiag->skylineSnapHits               = diagSkylineSnapHits;
         outDiag->skylineSnapProbes             = diagSkylineSnapProbes;
         // Power-independent clustering metric for cross-power CSV/analysis.

@@ -11,10 +11,8 @@ namespace Search
 {
 
 void TryRepairMove(PackContext& ctx, int gridW, int gridH, std::vector<Item>& curOrder, int n, Move& move, LCG& rng,
-                   int bestLerX, int bestLerY, int bestLerW, int bestLerH, int bestStranded,
-                   std::vector<unsigned char>& repairGrid, std::vector<unsigned char>& repairReachable,
-                   std::vector<int>& repairStrandedList, bool& repairGridDirty, int totalCellsRepair,
-                   int effLateBiasAlphaQ, int effLateBiasUniformPct, int& diagRepairMoveScans, int& diagRepairMoveHits)
+                   const PackState& bestState, int effLateBiasAlphaQ, int effLateBiasUniformPct,
+                   int& diagRepairMoveScans, int& diagRepairMoveHits)
 {
     // Caller guarantees n >= 3; guard makes it visible to clang-analyzer.
     if (n < 2) return;
@@ -22,50 +20,52 @@ void TryRepairMove(PackContext& ctx, int gridW, int gridH, std::vector<Item>& cu
     move.type        = MOVE_REPAIR;
     bool repairFound = false;
 
-    if (bestStranded > 0 && !ctx.bestPl.empty())
+    if (bestState.strandedCells > 0 && !ctx.bestPl.empty())
     {
         ++diagRepairMoveScans;
+        const int totalCellsRepair = gridW * gridH;
         // Rebuild ctx.bestPl occupancy + LER reachability only when
         // ctx.bestPl changed. Cache hit: memcpy 400 bytes vs full
         // rebuild + flood fill (~2-4us). ctx.grid is kept
         // incrementally current by SkylinePack for the *current*
-        // ordering, so we build bestPl occupancy into repairGrid
+        // ordering, so we build bestPl occupancy into ctx.repair.grid
         // directly rather than clobbering ctx.grid.
-        if (repairGridDirty)
+        if (ctx.repair.dirty)
         {
-            memset(&repairGrid[0], 0, totalCellsRepair);
+            memset(&ctx.repair.grid[0], 0, totalCellsRepair);
             for (size_t pi = 0; pi < ctx.bestPl.size(); ++pi)
             {
                 const Placement& bp = ctx.bestPl[pi];
                 for (int dy = 0; dy < bp.h; ++dy)
-                    memset(&repairGrid[(bp.y + dy) * gridW + bp.x], 1, bp.w);
+                    memset(&ctx.repair.grid[(bp.y + dy) * gridW + bp.x], 1, bp.w);
             }
-            Grid::FloodFillFromLer(ctx, gridW, gridH, bestLerX, bestLerY, bestLerW, bestLerH, &repairGrid[0]);
-            memcpy(&repairReachable[0], &ctx.visited[0], totalCellsRepair);
+            Grid::FloodFillFromLer(ctx, gridW, gridH, bestState.lerX, bestState.lerY, bestState.lerWidth,
+                                   bestState.lerHeight, &ctx.repair.grid[0]);
+            memcpy(&ctx.repair.reachable[0], &ctx.visited[0], totalCellsRepair);
             // Build stranded-cell list in the same scan order the
             // reservoir loop used to walk, so the RNG stream below
             // is byte-identical to the pre-cache implementation.
-            repairStrandedList.clear();
+            ctx.repair.strandedList.clear();
             for (int sy = 1; sy < gridH - 1; ++sy)
             {
                 for (int sx = 1; sx < gridW - 1; ++sx)
                 {
                     int si = sy * gridW + sx;
-                    if (repairGrid[si] == 0 && !ctx.visited[si]) repairStrandedList.push_back(si);
+                    if (ctx.repair.grid[si] == 0 && !ctx.visited[si]) ctx.repair.strandedList.push_back(si);
                 }
             }
-            repairGridDirty = false;
+            ctx.repair.dirty = false;
         }
         else
         {
-            memcpy(&ctx.visited[0], &repairReachable[0], totalCellsRepair);
+            memcpy(&ctx.visited[0], &ctx.repair.reachable[0], totalCellsRepair);
         }
 
         int strandedX = -1, strandedY = -1;
         int candidates = 0;
-        for (size_t li = 0; li < repairStrandedList.size(); ++li)
+        for (size_t li = 0; li < ctx.repair.strandedList.size(); ++li)
         {
-            int si = repairStrandedList[li];
+            int si = ctx.repair.strandedList[li];
             ++candidates;
             if (rng.nextInt(candidates) == 0)
             {
@@ -97,22 +97,22 @@ void TryRepairMove(PackContext& ctx, int gridW, int gridH, std::vector<Item>& cu
                 minGY  = std::min(minGY, cy);
                 maxGY  = std::max(maxGY, cy);
 
-                if (cx > 0 && !ctx.visited[ci - 1] && !repairGrid[ci - 1])
+                if (cx > 0 && !ctx.visited[ci - 1] && !ctx.repair.grid[ci - 1])
                 {
                     ctx.visited[ci - 1] = 1;
                     ctx.ler.floodStack.push_back(ci - 1);
                 }
-                if (cx < gridW - 1 && !ctx.visited[ci + 1] && !repairGrid[ci + 1])
+                if (cx < gridW - 1 && !ctx.visited[ci + 1] && !ctx.repair.grid[ci + 1])
                 {
                     ctx.visited[ci + 1] = 1;
                     ctx.ler.floodStack.push_back(ci + 1);
                 }
-                if (cy > 0 && !ctx.visited[ci - gridW] && !repairGrid[ci - gridW])
+                if (cy > 0 && !ctx.visited[ci - gridW] && !ctx.repair.grid[ci - gridW])
                 {
                     ctx.visited[ci - gridW] = 1;
                     ctx.ler.floodStack.push_back(ci - gridW);
                 }
-                if (cy < gridH - 1 && !ctx.visited[ci + gridW] && !repairGrid[ci + gridW])
+                if (cy < gridH - 1 && !ctx.visited[ci + gridW] && !ctx.repair.grid[ci + gridW])
                 {
                     ctx.visited[ci + gridW] = 1;
                     ctx.ler.floodStack.push_back(ci + gridW);

@@ -194,9 +194,12 @@ void FindBestBAF(const std::vector<Rect>& freeRects, const Item& item, int numOr
 
 } // namespace
 
-void MaxRectsPack(PackContext& ctx, int gridW, int gridH, const std::vector<Item>& items, int target,
+void MaxRectsPack(PackContext& ctx, const GridSpec& dims, const std::vector<Item>& items,
                   const volatile long* abortFlag, int reserveX, int reserveW, int heuristic)
 {
+    const int gridW  = dims.gridW;
+    const int gridH  = dims.gridH;
+    const int target = dims.target;
     ctx.placements.clear();
     ctx.maxRects.freeRects.clear();
 

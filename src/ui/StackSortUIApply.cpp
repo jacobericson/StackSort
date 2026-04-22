@@ -217,8 +217,11 @@ void StackSortUI::ApplySort(InventoryGUI* gui, int target, int& outAppliedLerSid
         syncParams.itersPerRestart      = 1000;
 
         QueryPerformanceCounter(&t0);
-        Packer::Result result =
-            Packer::Search::PackAnnealed(gridW, gridH, packItems, dim, clamped, NULL, NULL, NULL, 0, &syncParams);
+        Packer::GridSpec dims;
+        dims.gridW            = gridW;
+        dims.gridH            = gridH;
+        dims.target           = clamped;
+        Packer::Result result = Packer::Search::PackAnnealed(dims, packItems, dim, NULL, NULL, NULL, 0, &syncParams);
         QueryPerformanceCounter(&t1);
 
         double ms = (double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart * 1000.0;

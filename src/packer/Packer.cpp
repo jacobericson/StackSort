@@ -100,6 +100,14 @@ void InitPackContext(PackContext& ctx, int gridW, int gridH, int numItems)
     ctx.bssfPl.reserve(numItems);
     ctx.seedPl.reserve(numItems);
     ctx.bestPl.reserve(numItems);
+    // Repair scratch: sized here so TryRepairMove's first-dirty path can
+    // memset + build without an allocation in the inner loop. dirty=true
+    // ensures the first TryRepairMove call rebuilds from the (empty)
+    // ctx.bestPl we're about to populate.
+    ctx.repair.grid.resize(totalCells);
+    ctx.repair.reachable.resize(totalCells);
+    ctx.repair.strandedList.clear();
+    ctx.repair.dirty                        = true;
     ctx.skylineWasteCoef                    = DEFAULT_SKYLINE_WASTE_COEF;
     ctx.scoring.groupingWeight              = DEFAULT_GROUPING_WEIGHT;
     ctx.scoring.fragWeight                  = DEFAULT_FRAG_WEIGHT;
@@ -159,18 +167,21 @@ void InitPackContext(PackContext& ctx, int gridW, int gridH, int numItems)
 #endif
 }
 
-Result Pack(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim, int target,
-            const volatile long* abortFlag, PackContext* reuseCtx)
+Result Pack(const GridSpec& dims, const std::vector<Item>& items, TargetDim dim, const volatile long* abortFlag,
+            PackContext* reuseCtx)
 {
-    if (dim == TARGET_H) return PackH(gridW, gridH, items, target, abortFlag, reuseCtx);
+    if (dim == TARGET_H) return PackH(dims, items, abortFlag, reuseCtx);
 
     // W-mode: transpose, run H-mode, transpose back.
     std::vector<Item> itemsT = items;
     for (size_t i = 0; i < itemsT.size(); ++i)
         std::swap(itemsT[i].w, itemsT[i].h);
 
-    // NOLINTNEXTLINE(readability-suspicious-call-argument) — W-mode transpose: itemsT has w/h swapped and placements are swapped back after the call.
-    Result r = PackH(gridH, gridW, itemsT, target, abortFlag, reuseCtx);
+    GridSpec dimsT;
+    dimsT.gridW  = dims.gridH;
+    dimsT.gridH  = dims.gridW;
+    dimsT.target = dims.target;
+    Result r     = PackH(dimsT, itemsT, abortFlag, reuseCtx);
 
     for (size_t i = 0; i < r.placements.size(); ++i)
     {
@@ -183,9 +194,12 @@ Result Pack(int gridW, int gridH, const std::vector<Item>& items, TargetDim dim,
     return r;
 }
 
-Result PackH(int gridW, int gridH, const std::vector<Item>& items, int target, const volatile long* abortFlag,
+Result PackH(const GridSpec& dims, const std::vector<Item>& items, const volatile long* abortFlag,
              PackContext* reuseCtx)
 {
+    const int gridW  = dims.gridW;
+    const int gridH  = dims.gridH;
+    const int target = dims.target;
     Result result;
     result.lerArea       = 0;
     result.lerWidth      = 0;
@@ -205,11 +219,11 @@ Result PackH(int gridW, int gridH, const std::vector<Item>& items, int target, c
     PackContext& ctx = reuseCtx ? *reuseCtx : localCtx;
     InitPackContext(ctx, gridW, gridH, (int)items.size());
 
-    Heuristics::MaxRectsPack(ctx, gridW, gridH, sorted, target, abortFlag, 0, 0, 0);
+    Heuristics::MaxRectsPack(ctx, dims, sorted, abortFlag, 0, 0, 0);
     if (abortFlag && *abortFlag != 0) return result;
     std::vector<Placement> bssfPl = ctx.placements;
 
-    Heuristics::MaxRectsPack(ctx, gridW, gridH, sorted, target, abortFlag, 0, 0, 1);
+    Heuristics::MaxRectsPack(ctx, dims, sorted, abortFlag, 0, 0, 1);
     if (abortFlag && *abortFlag != 0)
     {
         result.placements = bssfPl;

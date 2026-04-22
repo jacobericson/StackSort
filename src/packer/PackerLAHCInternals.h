@@ -203,27 +203,16 @@ static inline void RestoreSkylineState(PackContext& ctx, int gridW, int /*gridH*
     ctx.skyline.snapSkyline.resize((size_t)b.skylineStart + (size_t)b.skylineCount);
 }
 
-// Shared best-scalar update for the two LAHC sites and the Path Relinking
-// site. Keeps bestScore / ctx.bestPl / best LER tuple / bestConc /
-// bestStranded / repairGridDirty / *outBestOrder in lockstep. Call-site-
-// specific counters (itersSinceImproved, bestIterInRestart0, diagBestFound*)
-// stay inline at the LAHC sites.
-static inline void UpdateBestFromCurrent(PackContext& ctx, long long& bestScore, long long newScore, int& bestLerA,
-                                         int newLerA, int& bestLerW, int newLerW, int& bestLerH, int newLerH,
-                                         int& bestLerX, int newLerX, int& bestLerY, int newLerY, double& bestConc,
-                                         double newConc, int& bestStranded, int newStranded, bool& repairGridDirty,
+// Shared best-state update for the two LAHC sites and the Path Relinking
+// site. Keeps bestState / ctx.bestPl / ctx.repair.dirty / *outBestOrder in
+// lockstep. Call-site-specific counters (itersSinceImproved,
+// bestIterInRestart0, diagBestFound*) stay inline at the LAHC sites.
+static inline void UpdateBestFromCurrent(PackContext& ctx, PackState& bestState, const PackState& newState,
                                          std::vector<Item>* outBestOrder, const std::vector<Item>& curOrder)
 {
-    bestScore       = newScore;
-    ctx.bestPl      = ctx.placements;
-    bestLerA        = newLerA;
-    bestLerW        = newLerW;
-    bestLerH        = newLerH;
-    bestLerX        = newLerX;
-    bestLerY        = newLerY;
-    bestConc        = newConc;
-    bestStranded    = newStranded;
-    repairGridDirty = true;
+    bestState        = newState;
+    ctx.bestPl       = ctx.placements;
+    ctx.repair.dirty = true;
     if (outBestOrder) *outBestOrder = curOrder;
 }
 
@@ -239,15 +228,12 @@ void CapturePathRelinkElite(PackContext& ctx, const std::vector<Item>& curOrder,
 // best packing, finds an item whose dims could fill it, and moves that item
 // to position 0 in curOrder. Falls back to a random swap if no repair target
 // is found. Sets move.type + move.a/b and mutates curOrder in place.
-// repairGrid/repairReachable/repairStrandedList/repairGridDirty are the
-// LAHC-local scratch cache for bestPl occupancy + LER-reachability +
-// stranded-cell list, keyed on repairGridDirty so cache rebuilds happen only
-// when ctx.bestPl has changed.
+// Uses bestState.lerX/Y/W/H/strandedCells for repair-target detection and
+// ctx.repair.* for the cached bestPl occupancy + reachability + stranded
+// list, rebuilt lazily when ctx.repair.dirty.
 void TryRepairMove(PackContext& ctx, int gridW, int gridH, std::vector<Item>& curOrder, int n, Move& move, LCG& rng,
-                   int bestLerX, int bestLerY, int bestLerW, int bestLerH, int bestStranded,
-                   std::vector<unsigned char>& repairGrid, std::vector<unsigned char>& repairReachable,
-                   std::vector<int>& repairStrandedList, bool& repairGridDirty, int totalCellsRepair,
-                   int effLateBiasAlphaQ, int effLateBiasUniformPct, int& diagRepairMoveScans, int& diagRepairMoveHits);
+                   const PackState& bestState, int effLateBiasAlphaQ, int effLateBiasUniformPct,
+                   int& diagRepairMoveScans, int& diagRepairMoveHits);
 
 } // namespace Search
 

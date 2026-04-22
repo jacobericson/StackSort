@@ -109,11 +109,14 @@ void CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>& /*item
 // Candidate walk computes maxY + areaUnder in one segment sweep with an
 // early abort on maxY > maxAllowedY; waste is maxY * iw - areaUnder.
 
-void SkylinePack(PackContext& ctx, int gridW, int gridH, const std::vector<Item>& items, int target,
-                 const volatile long* abortFlag, int reserveX, int reserveW, int startIdx)
+void SkylinePack(PackContext& ctx, const GridSpec& dims, const std::vector<Item>& items, const volatile long* abortFlag,
+                 int reserveX, int reserveW, int startIdx)
 {
-    int reserveY   = gridH - target;
-    int totalCells = gridW * gridH;
+    const int gridW  = dims.gridW;
+    const int gridH  = dims.gridH;
+    const int target = dims.target;
+    int reserveY     = gridH - target;
+    int totalCells   = gridW * gridH;
 
     if (startIdx == 0)
     {

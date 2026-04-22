@@ -159,7 +159,11 @@ void SortWorker::ExecuteJob(Job* job, int workerIdx)
             int skipThreshold = (t <= maxLerSideCovered) ? globalBestLERArea : 0;
 
             std::vector<Packer::Item> newBestOrder;
-            Packer::Result result = Packer::Search::PackAnnealed(gridW, gridH, packItemsLocal, dim, t, &job->abortFlag,
+            Packer::GridSpec dims;
+            dims.gridW            = gridW;
+            dims.gridH            = gridH;
+            dims.target           = t;
+            Packer::Result result = Packer::Search::PackAnnealed(dims, packItemsLocal, dim, &job->abortFlag,
                                                                  lastBestOrder.empty() ? NULL : &lastBestOrder,
                                                                  &newBestOrder, skipThreshold, NULL, NULL, &sharedCtx);
 
@@ -353,9 +357,13 @@ void SortWorker::ExecuteJob(Job* job, int workerIdx)
         QueryPerformanceCounter(&t0);
 
         std::vector<Packer::Item> newBestOrder;
+        Packer::GridSpec dims;
+        dims.gridW  = gridW;
+        dims.gridH  = gridH;
+        dims.target = target;
         Packer::Result refined =
-            Packer::Search::PackAnnealed(gridW, gridH, packItemsLocal, dim, target, &job->abortFlag,
-                                         hasSeed ? &seedCopy : NULL, &newBestOrder, 0, &refineParams, NULL, &sharedCtx);
+            Packer::Search::PackAnnealed(dims, packItemsLocal, dim, &job->abortFlag, hasSeed ? &seedCopy : NULL,
+                                         &newBestOrder, 0, &refineParams, NULL, &sharedCtx);
 
         QueryPerformanceCounter(&t1);
 

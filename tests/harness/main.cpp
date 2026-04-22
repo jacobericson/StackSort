@@ -438,9 +438,12 @@ static int run(int argc, char** argv)
                 Packer::PackDiagnostics firstDiag;
                 LARGE_INTEGER tFP0, tFP1;
                 QueryPerformanceCounter(&tFP0);
-                Packer::Result firstPass =
-                    Packer::Search::PackAnnealed(inst.gridW, inst.gridH, inst.items, Packer::TARGET_H, target, NULL,
-                                                 NULL, &firstPassBest, 0, &runParams, &firstDiag);
+                Packer::GridSpec firstDims;
+                firstDims.gridW          = inst.gridW;
+                firstDims.gridH          = inst.gridH;
+                firstDims.target         = target;
+                Packer::Result firstPass = Packer::Search::PackAnnealed(
+                    firstDims, inst.items, Packer::TARGET_H, NULL, NULL, &firstPassBest, 0, &runParams, &firstDiag);
                 QueryPerformanceCounter(&tFP1);
                 double firstPassMs = (double)(tFP1.QuadPart - tFP0.QuadPart) * 1000.0 / (double)freq.QuadPart;
 
@@ -485,7 +488,7 @@ static int run(int argc, char** argv)
                         LARGE_INTEGER tR0, tR1;
                         QueryPerformanceCounter(&tR0);
                         Packer::Result refined = Packer::Search::PackAnnealed(
-                            inst.gridW, inst.gridH, inst.items, Packer::TARGET_H, target, NULL,
+                            firstDims, inst.items, Packer::TARGET_H, NULL,
                             firstPassBest.empty() ? NULL : &firstPassBest, &refineBest, 0, &refineParams, &refineDiag);
                         QueryPerformanceCounter(&tR1);
                         refineMs = (double)(tR1.QuadPart - tR0.QuadPart) * 1000.0 / (double)freq.QuadPart;
