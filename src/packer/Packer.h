@@ -586,13 +586,13 @@ struct ProfileCounters
 struct PackContext
 {
     // Cross-cutting outputs and grids — accessed from most TUs.
-    std::vector<Placement> placements;  // packing output
-    std::vector<Placement> bssfPl;      // LAHC best-so-far
-    std::vector<Placement> seedPl;      // LAHC greedy seed
-    std::vector<Placement> bestPl;      // LAHC best result
-    std::vector<unsigned char> grid;    // BuildOccupancyGrid
-    std::vector<unsigned char> visited; // flood-fill marker (LER + repair move)
-    std::vector<int> placementIdGrid;   // SkylinePack: placement index per cell (-1 = empty)
+    std::vector<Placement> placements;          // packing output
+    std::vector<Placement> bssfPl;              // LAHC best-so-far
+    std::vector<Placement> seedPl;              // LAHC greedy seed
+    std::vector<Placement> bestPl;              // LAHC best result
+    std::vector<unsigned char> grid;            // BuildOccupancyGrid
+    std::vector<unsigned char> visited;         // flood-fill marker (LER + repair move)
+    std::vector<unsigned char> placementIdGrid; // SkylinePack: placement index per cell (PLACEMENT_ID_EMPTY = empty)
 
     // Per-exactId placement count. EXACT_ID_CAP is a soft limit —
     // exactIds at or above fall back to full scan (correctness
@@ -613,6 +613,11 @@ struct PackContext
     // related; resolved per-pack from SearchParams.skylineWasteCoef.
     int skylineWasteCoef;
 
+    // Precomputed reciprocal for fast ci/gridW and ci%gridW.
+    // cy = (int)((unsigned long long)(unsigned int)ci * recipGridW >> 48);
+    // cx = ci - cy * gridW;
+    unsigned long long recipGridW;
+
 #ifdef STACKSORT_PROFILE
     ProfileCounters prof;
 #endif
@@ -632,7 +637,8 @@ struct AdjGraph
     int count[256];
 };
 
-static const int TARGET_BONUS = 10000;
+static const int TARGET_BONUS                 = 10000;
+static const unsigned char PLACEMENT_ID_EMPTY = 0xFF;
 
 // Pure rect/placement math. Stateless primitives shared by scoring + heuristics.
 namespace Geometry

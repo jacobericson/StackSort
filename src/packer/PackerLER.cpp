@@ -126,8 +126,8 @@ double ComputeConcentrationAndStrandedCtx(PackContext& ctx, int gridW, int gridH
         {
             int ci = flood[--floodTop];
             ++area;
-            int cx = ci % gridW;
-            int cy = ci / gridW;
+            int cy = (int)((unsigned long long)(unsigned int)ci * ctx.recipGridW >> 48);
+            int cx = ci - cy * gridW;
 
             // Interior filter: x∈[1,W-2], y∈[1,H-2]. Border cells never
             // contribute to stranded count, matching legacy.
@@ -243,8 +243,8 @@ void FloodFillFromLer(PackContext& ctx, int gridW, int gridH, int lerX, int lerY
     while (floodTop > 0)
     {
         int ci = flood[--floodTop];
-        int cx = ci % gridW;
-        int cy = ci / gridW;
+        int cy = (int)((unsigned long long)(unsigned int)ci * ctx.recipGridW >> 48);
+        int cx = ci - cy * gridW;
 
         if (cx > 0 && !vis[ci - 1] && !gridPtr[ci - 1])
         {

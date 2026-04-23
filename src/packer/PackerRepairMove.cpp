@@ -69,8 +69,8 @@ void TryRepairMove(PackContext& ctx, int gridW, int gridH, std::vector<Item>& cu
             ++candidates;
             if (rng.nextInt(candidates) == 0)
             {
-                strandedX = si % gridW;
-                strandedY = si / gridW;
+                strandedY = (int)((unsigned long long)(unsigned int)si * ctx.recipGridW >> 48);
+                strandedX = si - strandedY * gridW;
             }
         }
 
@@ -90,8 +90,8 @@ void TryRepairMove(PackContext& ctx, int gridW, int gridH, std::vector<Item>& cu
                 int ci = ctx.ler.floodStack.back();
                 ctx.ler.floodStack.pop_back();
                 ++gapCells;
-                int cx = ci % gridW;
-                int cy = ci / gridW;
+                int cy = (int)((unsigned long long)(unsigned int)ci * ctx.recipGridW >> 48);
+                int cx = ci - cy * gridW;
                 minGX  = std::min(minGX, cx);
                 maxGX  = std::max(maxGX, cx);
                 minGY  = std::min(minGY, cy);

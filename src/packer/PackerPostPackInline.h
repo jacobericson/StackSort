@@ -18,8 +18,9 @@ namespace PostPack
 // resync placementIdGrid after moving placements without rebuilding from
 // scratch.
 
-static inline void StampPlacementCells(std::vector<int>& placementIdGrid, const std::vector<Placement>& placements,
-                                       int gridW, const int* indices, int count)
+static inline void StampPlacementCells(std::vector<unsigned char>& placementIdGrid,
+                                       const std::vector<Placement>& placements, int gridW, const int* indices,
+                                       int count)
 {
     for (int k = 0; k < count; ++k)
     {
@@ -29,7 +30,7 @@ static inline void StampPlacementCells(std::vector<int>& placementIdGrid, const 
         {
             int rowOffset = (p.y + dy) * gridW;
             for (int dx = 0; dx < p.w; ++dx)
-                placementIdGrid[rowOffset + (p.x + dx)] = idx;
+                placementIdGrid[rowOffset + (p.x + dx)] = (unsigned char)idx;
         }
     }
 }

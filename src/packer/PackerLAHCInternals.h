@@ -168,7 +168,7 @@ static inline void RestoreSkylineState(PackContext& ctx, int gridW, int /*gridH*
             {
                 int cellIdx                  = (p.y + dy) * gridW + (p.x + dx);
                 ctx.grid[cellIdx]            = 0;
-                ctx.placementIdGrid[cellIdx] = -1;
+                ctx.placementIdGrid[cellIdx] = PLACEMENT_ID_EMPTY;
             }
     }
 

@@ -87,8 +87,8 @@ void CollectAdjacentPids(const PackContext& ctx, const std::vector<Item>& /*item
     if (curExactId < 0) return;
     for (int i = 0; i < count; ++i)
     {
-        int pidx = ctx.placementIdGrid[start + i * step];
-        if (pidx < 0 || ctx.placements[pidx].exactId != curExactId) continue;
+        int pidx = (int)ctx.placementIdGrid[start + i * step];
+        if (pidx == PLACEMENT_ID_EMPTY || ctx.placements[pidx].exactId != curExactId) continue;
         bool dup = false;
         for (int k = 0; k < numAdj; ++k)
             if (adjPids[k] == pidx)
@@ -126,7 +126,7 @@ void SkylinePack(PackContext& ctx, const GridSpec& dims, const std::vector<Item>
         ctx.skyline.wasteRects.clear();
 
         ctx.placementIdGrid.resize(totalCells);
-        memset(&ctx.placementIdGrid[0], 0xFF, totalCells * sizeof(int));
+        memset(&ctx.placementIdGrid[0], 0xFF, totalCells);
 
         // ctx.grid is maintained incrementally across commits + rollbacks so
         // callers (ComputeLERCtx, GridCacheLookup) can read it without a
@@ -223,7 +223,7 @@ void SkylinePack(PackContext& ctx, const GridSpec& dims, const std::vector<Item>
                     for (int dx = 0; dx < p.w; ++dx)
                     {
                         int cellIdx                  = (p.y + dy) * gridW + (p.x + dx);
-                        ctx.placementIdGrid[cellIdx] = pidx;
+                        ctx.placementIdGrid[cellIdx] = (unsigned char)pidx;
                         ctx.grid[cellIdx]            = 1;
                         ctx.cache.curHashA ^= zA[cellIdx];
                         ctx.cache.curHashB ^= zB[cellIdx];
@@ -439,7 +439,7 @@ void SkylinePack(PackContext& ctx, const GridSpec& dims, const std::vector<Item>
                 for (int dx = 0; dx < bestW; ++dx)
                 {
                     int cellIdx                  = (bestY + dy) * gridW + (bestX + dx);
-                    ctx.placementIdGrid[cellIdx] = pidx;
+                    ctx.placementIdGrid[cellIdx] = (unsigned char)pidx;
                     ctx.grid[cellIdx]            = 1;
                     ctx.cache.curHashA ^= zA[cellIdx];
                     ctx.cache.curHashB ^= zB[cellIdx];

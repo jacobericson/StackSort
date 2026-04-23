@@ -170,8 +170,8 @@ void TileSwap(std::vector<Placement>& placements, const std::vector<Item>& items
                         int rowOff = (ty + dy) * gridW;
                         for (int dx = 0; dx < tw; ++dx)
                         {
-                            int pidx = ctx.placementIdGrid[rowOff + (tx + dx)];
-                            if (pidx < 0)
+                            int pidx = (int)ctx.placementIdGrid[rowOff + (tx + dx)];
+                            if (pidx == PLACEMENT_ID_EMPTY)
                             {
                                 allFilled = false;
                                 bleeds    = true;
@@ -302,7 +302,7 @@ void TileSwap(std::vector<Placement>& placements, const std::vector<Item>& items
                         {
                             int rowOff = (ty + dy) * gridW;
                             for (int dx = 0; dx < tw; ++dx)
-                                ctx.placementIdGrid[rowOff + (tx + dx)] = xi;
+                                ctx.placementIdGrid[rowOff + (tx + dx)] = (unsigned char)xi;
                         }
                         int memberList[64];
                         for (int k = 0; k < numMembers; ++k)

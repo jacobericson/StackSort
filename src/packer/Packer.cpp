@@ -81,6 +81,7 @@ void SortItems(std::vector<Item>& items)
 void InitPackContext(PackContext& ctx, int gridW, int gridH, int numItems)
 {
     int totalCells = gridW * gridH;
+    ctx.recipGridW = ((1ULL << 48) / (unsigned int)gridW) + 1;
     ctx.maxRects.freeRects.reserve((size_t)numItems * 4u);
     ctx.maxRects.newRects.reserve((size_t)numItems * 4u);
     ctx.placements.reserve(numItems);
