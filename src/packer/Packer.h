@@ -388,11 +388,7 @@ struct LEREntry
 
 struct GridCacheEntry
 {
-    // 128-bit twin Zobrist key. Birthday-bound collision at realistic
-    // distinct-grid counts (~10^5 per run) is ~10^-31 — authoritative
-    // for bit-exact determinism without a parallel grid-blob compare.
     unsigned long long hashA;
-    unsigned long long hashB;
     int lerArea;
     int lerWidth;
     int lerHeight;
@@ -413,7 +409,6 @@ struct SkylineBoundary
     int skylineStart;
     int skylineCount;
     unsigned long long hashA;
-    unsigned long long hashB;
 };
 
 // Skyline arena comfortably covers the 20-wide corpus worst case
@@ -464,21 +459,18 @@ struct LerScratch
     std::vector<unsigned char> regionHasLer; // per-region LER-connectivity flag
 };
 
-// Zobrist keying + FIFO grid-cache ring for GridCacheLookup. Tables are
-// pure functions of (gridW, gridH) seeded via splitmix64 with independent
-// constants per table, so the twin-hash retains 128-bit entropy.
-// curHashA/B is XOR-maintained incrementally via EmitBoundary; each
-// SkylineBoundary snapshots the post-placement hash so RestoreSkylineState
-// can reload it in O(1). `count == 0` is logically empty — stale array
-// contents never matter, only overwritten on insert.
+// Zobrist keying + FIFO grid-cache ring for GridCacheLookup. Table is
+// a pure function of (gridW, gridH) seeded via splitmix64.
+// curHashA is XOR-maintained incrementally; each SkylineBoundary
+// snapshots the post-placement hash so RestoreSkylineState can reload
+// it in O(1). `count == 0` is logically empty — stale array contents
+// never matter, only overwritten on insert.
 struct GridCache
 {
     std::vector<unsigned long long> zobristA;
-    std::vector<unsigned long long> zobristB;
     int tableW;
     int tableH;
     unsigned long long curHashA;
-    unsigned long long curHashB;
     GridCacheEntry entries[GRID_CACHE_CAP];
     int count;
     int ringHead;

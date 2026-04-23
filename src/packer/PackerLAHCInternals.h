@@ -194,7 +194,6 @@ static inline void RestoreSkylineState(PackContext& ctx, int gridW, int /*gridH*
     }
 
     ctx.cache.curHashA = b.hashA;
-    ctx.cache.curHashB = b.hashB;
 
     // SkylinePack's emit-on-placement push_backs must land at boundary k+1;
     // stale entries past boundary[keptPrefix] would otherwise offset them.

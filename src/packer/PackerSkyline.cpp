@@ -75,7 +75,6 @@ void EmitBoundary(PackContext& ctx, int /*gridW*/, int /*placeX*/, int /*placeY*
     }
     b.skylineCount = skylineCount;
     b.hashA        = ctx.cache.curHashA;
-    b.hashB        = ctx.cache.curHashB;
     ctx.skyline.snapBoundaries.push_back(b);
 }
 
@@ -139,7 +138,6 @@ void SkylinePack(PackContext& ctx, const GridSpec& dims, const std::vector<Item>
         ctx.skyline.snapSkyline.clear();
         memset(ctx.typeCount, 0, sizeof(ctx.typeCount));
         ctx.cache.curHashA = 0;
-        ctx.cache.curHashB = 0;
         EmitBoundary(ctx, gridW, 0, 0, 0, 0);
     }
     else
@@ -218,7 +216,6 @@ void SkylinePack(PackContext& ctx, const GridSpec& dims, const std::vector<Item>
             {
                 int pidx                     = (int)ctx.placements.size() - 1;
                 const unsigned long long* zA = &ctx.cache.zobristA[0];
-                const unsigned long long* zB = &ctx.cache.zobristB[0];
                 for (int dy = 0; dy < p.h; ++dy)
                     for (int dx = 0; dx < p.w; ++dx)
                     {
@@ -226,7 +223,6 @@ void SkylinePack(PackContext& ctx, const GridSpec& dims, const std::vector<Item>
                         ctx.placementIdGrid[cellIdx] = (unsigned char)pidx;
                         ctx.grid[cellIdx]            = 1;
                         ctx.cache.curHashA ^= zA[cellIdx];
-                        ctx.cache.curHashB ^= zB[cellIdx];
                     }
             }
 
@@ -434,7 +430,6 @@ void SkylinePack(PackContext& ctx, const GridSpec& dims, const std::vector<Item>
         {
             int pidx                     = (int)ctx.placements.size() - 1;
             const unsigned long long* zA = &ctx.cache.zobristA[0];
-            const unsigned long long* zB = &ctx.cache.zobristB[0];
             for (int dy = 0; dy < bestH; ++dy)
                 for (int dx = 0; dx < bestW; ++dx)
                 {
@@ -442,7 +437,6 @@ void SkylinePack(PackContext& ctx, const GridSpec& dims, const std::vector<Item>
                     ctx.placementIdGrid[cellIdx] = (unsigned char)pidx;
                     ctx.grid[cellIdx]            = 1;
                     ctx.cache.curHashA ^= zA[cellIdx];
-                    ctx.cache.curHashB ^= zB[cellIdx];
                 }
         }
 

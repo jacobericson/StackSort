@@ -135,21 +135,14 @@ void InitPackContext(PackContext& ctx, int gridW, int gridH, int numItems)
     if (ctx.cache.zobristA.empty() || ctx.cache.tableW != gridW || ctx.cache.tableH != gridH)
     {
         ctx.cache.zobristA.resize((size_t)totalCells);
-        ctx.cache.zobristB.resize((size_t)totalCells);
         unsigned long long stateA =
             0xA5A5A5A5A5A5A5A5ULL ^ ((unsigned long long)gridW * 131ULL) ^ ((unsigned long long)gridH * 7919ULL);
-        unsigned long long stateB =
-            0x5A5A5A5A5A5A5A5AULL ^ ((unsigned long long)gridW * 983ULL) ^ ((unsigned long long)gridH * 1733ULL);
         for (int i = 0; i < totalCells; ++i)
-        {
             ctx.cache.zobristA[(size_t)i] = splitmix64_next(&stateA);
-            ctx.cache.zobristB[(size_t)i] = splitmix64_next(&stateB);
-        }
         ctx.cache.tableW = gridW;
         ctx.cache.tableH = gridH;
     }
     ctx.cache.curHashA = 0;
-    ctx.cache.curHashB = 0;
     ctx.skyline.snapBoundaries.reserve((size_t)numItems + 1);
     ctx.skyline.snapWaste.reserve((size_t)numItems * 30);
     ctx.skyline.snapSkyline.reserve((size_t)numItems * 20);
