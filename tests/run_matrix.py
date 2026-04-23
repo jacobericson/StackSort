@@ -80,18 +80,24 @@ DEFAULT_BIN     = os.path.join(SCRIPT_DIR, "harness", "bin", "stacksort_bench.ex
 
 
 def run_one(bench_bin, corpus_dir, config_path, rotate, base_seed, seeds,
-            refine, out_path, timeout, affinity_mask=None):
+            refine, out_path, timeout, affinity_mask=None, high_priority=False):
     """Returns (name, rotate, rc, elapsed, stderr).
 
     affinity_mask: optional DWORD_PTR mask passed as STACKSORT_PROFILE_AFFINITY
     so parallel shards can pin to distinct cores. Honored by both profile and
     non-profile harness builds (default mask = 1 in either). Env var name
-    kept for backward compat."""
+    kept for backward compat.
+
+    high_priority: when True, spawn the harness at HIGH_PRIORITY_CLASS to
+    reduce scheduler-preemption noise in profiling runs."""
     name = os.path.splitext(os.path.basename(config_path))[0]
     env = None
     if affinity_mask is not None:
         env = os.environ.copy()
         env["STACKSORT_PROFILE_AFFINITY"] = hex(affinity_mask)
+    flags = 0
+    if high_priority:
+        flags = subprocess.HIGH_PRIORITY_CLASS
     t0 = time.time()
     try:
         result = subprocess.run(
@@ -107,6 +113,7 @@ def run_one(bench_bin, corpus_dir, config_path, rotate, base_seed, seeds,
             text=True,
             timeout=timeout,
             env=env,
+            creationflags=flags,
         )
         rc = result.returncode
         stderr = result.stderr
@@ -218,16 +225,27 @@ def main():
                          "stem. Empty = run all configs in --configs dir.")
     ap.add_argument("--pin-shards", action="store_true",
                     help="Pin each parallel shard to its own CPU core via "
-                         "STACKSORT_PROFILE_AFFINITY=1<<(pin_base+job_idx). "
-                         "Keeps TSC clean under parallel profile runs and "
-                         "reduces scheduler-migration noise in non-profile "
-                         "runs. The env-var mask is honored by both harness "
-                         "builds (default mask = 1 when unset).")
+                         "STACKSORT_PROFILE_AFFINITY. Keeps TSC clean under "
+                         "parallel profile runs and reduces scheduler-migration "
+                         "noise in non-profile runs. The env-var mask is "
+                         "honored by both harness builds (default mask = 1 "
+                         "when unset). Core selection follows --pin-cores if "
+                         "set, else contiguous from --pin-base-core.")
     ap.add_argument("--pin-base-core", type=int, default=1,
-                    help="First core used when --pin-shards is set. Default "
-                         "1 leaves core 0 for the orchestrator/poller. Pair "
-                         "two run_matrix invocations on a 16-core machine "
-                         "by offsetting one of them.")
+                    help="First core used when --pin-shards is set (contiguous "
+                         "allocation). Default 1 leaves core 0 for the "
+                         "orchestrator/poller. Ignored if --pin-cores is set.")
+    ap.add_argument("--pin-cores", default="",
+                    help="Comma-separated explicit core list for --pin-shards, "
+                         "e.g. '8,12' pins shard 0 to core 8 and shard 1 to "
+                         "core 12 (useful for skipping SMT siblings on topo "
+                         "where logical N and N+1 share a physical core). "
+                         "Cycles through the list when there are more shards "
+                         "than cores. Overrides --pin-base-core.")
+    ap.add_argument("--high-priority", action="store_true",
+                    help="Spawn each harness subprocess at HIGH_PRIORITY_CLASS "
+                         "(Windows). Reduces scheduler-preemption noise in "
+                         "profiling runs. No effect on non-Windows platforms.")
     ap.add_argument("--keep-shards", action="store_true",
                     help="When sharding is active, keep the per-shard CSVs "
                          "alongside the merged output. Default is to merge "
@@ -280,17 +298,24 @@ def main():
                 jobs.append((cfg, rot, base_seed, n_seeds, out_path))
                 shards_by_cfgrot.setdefault((name, rot), []).append(out_path)
 
-    # Optional per-shard CPU pinning. Map each job to a distinct core, cycling
-    # through cores [pin_base_core .. cpu_count-1]. When pin_base_core > 0 the
-    # low cores are reserved (e.g. leave core 0 for the OS/IDE). If there are
-    # more jobs than cores in the range, masks wrap within the range — they
-    # never fall back to the reserved cores.
+    # Optional per-shard CPU pinning. If --pin-cores is given, cycle through
+    # that explicit list (useful for skipping SMT siblings). Otherwise map
+    # each job to a distinct core contiguously from pin_base_core. If there
+    # are more jobs than cores, masks wrap within the range.
     cpu_count = os.cpu_count() or 8
     job_affinities = [None] * len(jobs)
     if args.pin_shards:
-        core_range = max(1, cpu_count - args.pin_base_core)
-        for i in range(len(jobs)):
-            job_affinities[i] = 1 << (args.pin_base_core + (i % core_range))
+        if args.pin_cores:
+            explicit = [int(c.strip()) for c in args.pin_cores.split(",") if c.strip()]
+            if not explicit:
+                print("ERROR: --pin-cores is empty", file=sys.stderr)
+                return 1
+            for i in range(len(jobs)):
+                job_affinities[i] = 1 << explicit[i % len(explicit)]
+        else:
+            core_range = max(1, cpu_count - args.pin_base_core)
+            for i in range(len(jobs)):
+                job_affinities[i] = 1 << (args.pin_base_core + (i % core_range))
 
     shard_note = " x {} shards".format(args.seed_shards) if args.seed_shards > 1 else ""
     print("Running {} jobs ({} configs x {} rotations{}), {} seeds, refine={}, {} workers, timeout={}s".format(
@@ -316,7 +341,7 @@ def main():
         futures = {
             ex.submit(run_one, args.bench, args.corpus, cfg, rot,
                       base_seed, n_seeds, args.refine, out_path, args.timeout,
-                      job_affinities[i]): (cfg, rot)
+                      job_affinities[i], args.high_priority): (cfg, rot)
             for i, (cfg, rot, base_seed, n_seeds, out_path) in enumerate(jobs)
         }
         for fut in cf.as_completed(futures):

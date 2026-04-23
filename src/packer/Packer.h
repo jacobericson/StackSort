@@ -2,6 +2,14 @@
 
 #include <vector>
 
+#ifdef STACKSORT_PGO_DLL
+#define PACKER_API __declspec(dllexport)
+#elif defined(STACKSORT_PGO_HOST)
+#define PACKER_API __declspec(dllimport)
+#else
+#define PACKER_API
+#endif
+
 namespace Packer
 {
 
@@ -805,10 +813,11 @@ Result Pack(const GridSpec& dims, const std::vector<Item>& items, TargetDim dim,
 // params: if non-NULL, overrides LAHC constants and ablation flags.
 // outDiag: if non-NULL, receives diagnostic counters for the harness/tuner.
 // W-mode transposes internally.
-Result PackAnnealed(const GridSpec& dims, const std::vector<Item>& items, TargetDim dim,
-                    const volatile long* abortFlag = NULL, const std::vector<Item>* seedOrder = NULL,
-                    std::vector<Item>* outBestOrder = NULL, int skipLAHCIfAreaBelow = 0,
-                    const SearchParams* params = NULL, PackDiagnostics* outDiag = NULL, PackContext* reuseCtx = NULL);
+PACKER_API Result PackAnnealed(const GridSpec& dims, const std::vector<Item>& items, TargetDim dim,
+                               const volatile long* abortFlag = NULL, const std::vector<Item>* seedOrder = NULL,
+                               std::vector<Item>* outBestOrder = NULL, int skipLAHCIfAreaBelow = 0,
+                               const SearchParams* params = NULL, PackDiagnostics* outDiag = NULL,
+                               PackContext* reuseCtx = NULL);
 
 // H-mode implementations of Pack/PackAnnealed. The public Pack/PackAnnealed
 // dispatch here directly for TARGET_H and via a transpose wrapper for TARGET_W.

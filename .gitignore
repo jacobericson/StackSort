@@ -44,3 +44,4 @@
 !/tests/harness/*.cpp
 !/tests/harness/*.h
 !/tests/harness/.clang-tidy
+!/tests/harness/pgo_dispatch.py

@@ -259,13 +259,33 @@ static void hook_sectionRemoveItemCallback(Inventory* thisptr, Item* item)
     }
 }
 
+// PGO builds: /LTCG:PGO can generate local import thunks for &Class::Method
+// even with /GL, causing GetRealAddress to assert the address is outside
+// KenshiLib.dll's FUNC_BEGIN..FUNC_END range. Resolve via GetProcAddress
+// to always get the KenshiLib.dll export address.
+#ifdef STACKSORT_PGO_DLL
+static intptr_t GetHookTargetByName(const char* mangledName)
+{
+    static HMODULE klib = GetModuleHandle(L"KenshiLib.dll");
+    if (!klib) return 0;
+    void* addr = (void*)GetProcAddress(klib, mangledName);
+    if (!addr) return 0;
+    return KenshiLib::GetRealAddress(addr);
+}
+#define HOOK_TARGET(mangled, cls, method) GetHookTargetByName(mangled)
+#else
+#define HOOK_TARGET(mangled, cls, method) KenshiLib::GetRealAddress(&cls::method)
+#endif
+
 __declspec(dllexport) void startPlugin()
 {
     LogInfo("[StackSort] Starting plugin v0.7.0...");
 
     // Hook 1: autoArrangeButton — replace vanilla sort
-    if (KenshiLib::SUCCESS != KenshiLib::AddHook((void*)KenshiLib::GetRealAddress(&InventoryGUI::autoArrangeButton),
-                                                 (void*)hook_autoArrangeButton, (void**)&orig_autoArrangeButton))
+    intptr_t addr1 =
+        HOOK_TARGET("?autoArrangeButton@InventoryGUI@@QEAAXPEAVWidget@MyGUI@@@Z", InventoryGUI, autoArrangeButton);
+    if (!addr1 || KenshiLib::SUCCESS !=
+                      KenshiLib::AddHook((void*)addr1, (void*)hook_autoArrangeButton, (void**)&orig_autoArrangeButton))
     {
         LogError("[StackSort] FATAL: Failed to hook autoArrangeButton");
         return;
@@ -273,8 +293,8 @@ __declspec(dllexport) void startPlugin()
     LogInfo("[StackSort] Hooked autoArrangeButton OK");
 
     // Hook 2: show — inventory close detection
-    if (KenshiLib::SUCCESS != KenshiLib::AddHook((void*)KenshiLib::GetRealAddress(&InventoryGUI::_NV_show),
-                                                 (void*)hook_show, (void**)&orig_show))
+    intptr_t addr2 = HOOK_TARGET("?_NV_show@InventoryGUI@@QEAAX_N@Z", InventoryGUI, _NV_show);
+    if (!addr2 || KenshiLib::SUCCESS != KenshiLib::AddHook((void*)addr2, (void*)hook_show, (void**)&orig_show))
     {
         LogError("[StackSort] WARNING: Failed to hook show (non-fatal)");
     }
@@ -284,8 +304,8 @@ __declspec(dllexport) void startPlugin()
     }
 
     // Hook 3: _NV_update — open detection + worker poll
-    if (KenshiLib::SUCCESS != KenshiLib::AddHook((void*)KenshiLib::GetRealAddress(&InventoryGUI::_NV_update),
-                                                 (void*)hook_update, (void**)&orig_update))
+    intptr_t addr3 = HOOK_TARGET("?_NV_update@InventoryGUI@@QEAAXXZ", InventoryGUI, _NV_update);
+    if (!addr3 || KenshiLib::SUCCESS != KenshiLib::AddHook((void*)addr3, (void*)hook_update, (void**)&orig_update))
     {
         LogError("[StackSort] WARNING: Failed to hook _NV_update (non-fatal)");
     }
@@ -295,9 +315,10 @@ __declspec(dllexport) void startPlugin()
     }
 
     // Hook 4: _sectionAddItemCallback — mutation detection
-    if (KenshiLib::SUCCESS !=
-        KenshiLib::AddHook((void*)KenshiLib::GetRealAddress(&Inventory::_NV__sectionAddItemCallback),
-                           (void*)hook_sectionAddItemCallback, (void**)&orig_sectionAddCb))
+    intptr_t addr4 = HOOK_TARGET("?_NV__sectionAddItemCallback@Inventory@@QEAAXPEAVItem@@@Z", Inventory,
+                                 _NV__sectionAddItemCallback);
+    if (!addr4 || KenshiLib::SUCCESS !=
+                      KenshiLib::AddHook((void*)addr4, (void*)hook_sectionAddItemCallback, (void**)&orig_sectionAddCb))
     {
         LogError("[StackSort] WARNING: Failed to hook sectionAddItemCallback (non-fatal)");
     }
@@ -307,9 +328,10 @@ __declspec(dllexport) void startPlugin()
     }
 
     // Hook 5: _sectionRemoveItemCallback — mutation detection
-    if (KenshiLib::SUCCESS !=
-        KenshiLib::AddHook((void*)KenshiLib::GetRealAddress(&Inventory::_NV__sectionRemoveItemCallback),
-                           (void*)hook_sectionRemoveItemCallback, (void**)&orig_sectionRemoveCb))
+    intptr_t addr5 = HOOK_TARGET("?_NV__sectionRemoveItemCallback@Inventory@@QEAAXPEAVItem@@@Z", Inventory,
+                                 _NV__sectionRemoveItemCallback);
+    if (!addr5 || KenshiLib::SUCCESS != KenshiLib::AddHook((void*)addr5, (void*)hook_sectionRemoveItemCallback,
+                                                           (void**)&orig_sectionRemoveCb))
     {
         LogError("[StackSort] WARNING: Failed to hook sectionRemoveItemCallback (non-fatal)");
     }
